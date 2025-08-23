@@ -1,0 +1,14 @@
+# Python dependencies for the doc-qa app
+pypdf
+langchain
+langchain-community
+langchain-google-vertexai
+langchain-google-genai
+faiss-cpu
+python-dotenv
+google-cloud-aiplatform
+google-auth
+streamlit
+fastapi
+uvicorn
+python-multipart
