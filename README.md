@@ -52,9 +52,25 @@ Alternative prototypes:
 
 ---
 ## 🔧 Tech Stack
-Frontend: Next.js 14 (App Router), TypeScript, Tailwind CSS, Framer Motion
-Backend: Python 3, LangChain, Vertex AI Embeddings, Gemini (langchain-google-genai), FAISS, FastAPI, Streamlit (prototype)
-Utilities: python-dotenv, google-auth, google-cloud-aiplatform
+**Frontend:**
+- Next.js 14 (App Router) with TypeScript
+- Tailwind CSS for styling
+- Framer Motion for animations
+- Custom typography (FK Grotesk & PP Editorial)
+
+**Backend:**
+- Python 3.10+ with FastAPI
+- LangChain for document processing
+- Google Vertex AI Embeddings
+- Gemini LLM (langchain-google-genai)
+- FAISS vector similarity search
+- Streamlit (prototype UI)
+
+**Infrastructure & Utilities:**
+- Google Cloud Platform (Vertex AI)
+- python-dotenv for environment management
+- google-auth & google-cloud-aiplatform
+- pypdf for PDF text extraction
 
 ---
 ## ✅ Prerequisites
