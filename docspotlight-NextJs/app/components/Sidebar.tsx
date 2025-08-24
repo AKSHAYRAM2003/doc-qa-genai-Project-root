@@ -55,14 +55,8 @@ const IconButton = ({ icon, label, onClick, active = false, collapsed = false }:
   </motion.button>
 )
 
-// Random chat data for demo
-const demoChats = [
-  { id: 'demo1', title: 'Marketing Strategy Analysis', createdAt: Date.now() - 3600000 },
-  { id: 'demo2', title: 'Financial Report Q3 2024', createdAt: Date.now() - 7200000 },
-  { id: 'demo3', title: 'Product Launch Guidelines', createdAt: Date.now() - 10800000 },
-  { id: 'demo4', title: 'Technical Documentation', createdAt: Date.now() - 14400000 },
-  { id: 'demo5', title: 'User Research Findings', createdAt: Date.now() - 18000000 },
-]
+// Removed demo placeholder chats – sidebar now reflects real chat history only
+const demoChats: HistoryItem[] = []
 
 export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onNew, open, onClose, onToggle }) => {
   const [searchQuery, setSearchQuery] = useState('')
@@ -79,9 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onN
     return () => window.removeEventListener('resize', checkScreenSize)
   }, [])
   
-  const filteredItems = [...items, ...demoChats].filter(item => 
-    item.title.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredItems = [...items, ...demoChats].filter(item => item.title.toLowerCase().includes(searchQuery.toLowerCase()))
 
   return (
     <>
@@ -184,7 +176,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onN
           {/* Hamburger Menu on the right - always show, becomes X on mobile when open */}
           <button 
             onClick={onToggle} 
-            className="p-2 rounded-lg hover:bg-neutral-200 text-neutral-300" 
+            className="p-2 rounded-full hover:bg-neutral-700 text-neutral-300" 
             aria-label="Toggle sidebar"
           >
             {isMobile && open ? (

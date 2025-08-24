@@ -49,10 +49,30 @@ export default function HomePage() {
   // Current chat messages derived from allMessages
   const messages = allMessages[activeChatId || ''] || []
 
+  // Load persisted chats
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('docspotlight_chats')
+      if (saved) {
+        const parsed = JSON.parse(saved) as { history: HistoryItem[]; messages: Record<string, ChatMessage[]>; activeId?: string }
+        setHistory(parsed.history || [])
+        setAllMessages(parsed.messages || {})
+        setActiveChatId(parsed.activeId || null)
+      }
+    } catch {}
+  }, [])
+
+  // Persist on changes
+  useEffect(() => {
+    const data = JSON.stringify({ history, messages: allMessages, activeId: activeChatId })
+    try { localStorage.setItem('docspotlight_chats', data) } catch {}
+  }, [history, allMessages, activeChatId])
+
   function startNewChat() {
     const id = crypto.randomUUID()
     setActiveChatId(id)
     setAllMessages(m => ({ ...m, [id]: [] }))
+    setHistory(h => [...h, { id, title: 'New Chat', createdAt: Date.now() }])
   }
 
   useEffect(() => {
