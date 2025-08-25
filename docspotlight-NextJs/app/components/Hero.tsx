@@ -9,6 +9,12 @@ interface HeroProps {
   onSearch: (query: string) => void
   searchDisabled: boolean
   uploadedFileName?: string
+  // Multi-document props
+  documents?: any[]
+  collections?: any[]
+  selectedCollection?: string | null
+  onCollectionSelect?: (collectionId: string | null) => void
+  onShowCollectionManager?: () => void
 }
 
 export const Hero: React.FC<HeroProps> = ({ 
@@ -17,7 +23,12 @@ export const Hero: React.FC<HeroProps> = ({
   docId, 
   onSearch, 
   searchDisabled,
-  uploadedFileName: propUploadedFileName
+  uploadedFileName: propUploadedFileName,
+  documents = [],
+  collections = [],
+  selectedCollection,
+  onCollectionSelect,
+  onShowCollectionManager
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [showUploadModal, setShowUploadModal] = useState(false)
@@ -233,6 +244,65 @@ export const Hero: React.FC<HeroProps> = ({
                   {suggestion}
                 </motion.button>
               ))}
+            </motion.div>
+          )}
+
+          {/* Multi-Document Collection Management */}
+          {documents.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.3 }}
+              className="w-full max-w-2xl bg-neutral-800/30 rounded-lg border border-neutral-700 p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-gray-300">🗂️ Document Collections</h3>
+                <button
+                  onClick={onShowCollectionManager}
+                  className="text-xs px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors"
+                >
+                  Create Collection
+                </button>
+              </div>
+              
+              {/* Collection Selection */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    id="single-doc"
+                    name="source"
+                    checked={!selectedCollection}
+                    onChange={() => onCollectionSelect?.(null)}
+                    className="w-4 h-4 text-indigo-600"
+                  />
+                  <label htmlFor="single-doc" className="text-sm text-gray-300">
+                    Single Document ({uploadedFileName || 'Latest uploaded'})
+                  </label>
+                </div>
+                
+                {collections.map((collection: any) => (
+                  <div key={collection.collection_id} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      id={collection.collection_id}
+                      name="source"
+                      checked={selectedCollection === collection.collection_id}
+                      onChange={() => onCollectionSelect?.(collection.collection_id)}
+                      className="w-4 h-4 text-indigo-600"
+                    />
+                    <label htmlFor={collection.collection_id} className="text-sm text-gray-300">
+                      📚 {collection.name} ({collection.documents || collection.total_documents} docs)
+                    </label>
+                  </div>
+                ))}
+              </div>
+              
+              {selectedCollection && (
+                <p className="text-xs text-indigo-400">
+                  Multi-document mode: Your questions will search across all documents in the collection.
+                </p>
+              )}
             </motion.div>
           )}
 

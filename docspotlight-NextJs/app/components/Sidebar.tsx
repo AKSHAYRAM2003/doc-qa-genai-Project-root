@@ -6,6 +6,9 @@ export interface HistoryItem {
   id: string
   title: string
   createdAt: number
+  hasPdf?: boolean
+  isCollection?: boolean
+  documentCount?: number
 }
 
 interface SidebarProps {
@@ -16,6 +19,8 @@ interface SidebarProps {
   open: boolean
   onClose: () => void
   onToggle: () => void
+  onRenameChat?: (id: string, newTitle: string) => void
+  onDeleteChat?: (id: string) => void
 }
 
 const variants = {
@@ -58,9 +63,22 @@ const IconButton = ({ icon, label, onClick, active = false, collapsed = false }:
 // Removed demo placeholder chats – sidebar now reflects real chat history only
 const demoChats: HistoryItem[] = []
 
-export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onNew, open, onClose, onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  items, 
+  activeId, 
+  onSelect, 
+  onNew, 
+  open, 
+  onClose, 
+  onToggle, 
+  onRenameChat, 
+  onDeleteChat 
+}) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [isMobile, setIsMobile] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const collapsed = !open
   
   useEffect(() => {
@@ -74,6 +92,33 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onN
   }, [])
   
   const filteredItems = [...items, ...demoChats].filter(item => item.title.toLowerCase().includes(searchQuery.toLowerCase()))
+
+  const handleRename = (id: string, currentTitle: string) => {
+    setEditingId(id)
+    setEditingTitle(currentTitle)
+    setActiveMenu(null)
+  }
+  
+  const handleRenameSubmit = (id: string) => {
+    if (onRenameChat && editingTitle.trim()) {
+      onRenameChat(id, editingTitle.trim())
+    }
+    setEditingId(null)
+    setEditingTitle('')
+  }
+  
+  const handleDelete = (id: string) => {
+    if (onDeleteChat) {
+      onDeleteChat(id)
+    }
+    setActiveMenu(null)
+  }
+  
+  const handleMenuClick = (e: React.MouseEvent, itemId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setActiveMenu(activeMenu === itemId ? null : itemId)
+  }
 
   return (
     <>
@@ -238,17 +283,179 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onN
               <div className="text-xs text-neutral-500 px-2 py-4 text-center">No chats found</div>
             )}
             {filteredItems.map(item => (
-              <motion.button
+              <motion.div
                 key={item.id}
-                onClick={() => { onSelect(item.id); if (typeof window !== 'undefined' && window.innerWidth < 768) onClose(); }}
-                className={`group w-full text-left rounded-lg px-3 py-2.5 flex flex-col gap-1 border border-transparent hover:border-neutral-700 hover:bg-neutral-800/60 transition-all duration-200 ${item.id === activeId ? 'bg-neutral-800/80 border-neutral-700' : ''}`}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
+                className={`group relative w-full rounded-lg transition-all duration-200 ${
+                  item.id === activeId 
+                    ? 'bg-neutral-800/80' 
+                    : 'hover:bg-neutral-800/60'
+                } ${activeMenu === item.id ? 'bg-neutral-800/80' : ''}`}
+                whileHover={activeMenu === item.id ? {} : { scale: 1.005 }}
+                whileTap={activeMenu === item.id ? {} : { scale: 0.995 }}
               >
-                <span className="text-sm font-medium truncate text-white/90 font-heading">{item.title}</span>
-                <span className="text-xs text-neutral-500">{new Date(item.createdAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span>
-              </motion.button>
-            ))}
+                {/* Main Chat Row */}
+                <div 
+                  className="flex items-center gap-3 px-3 py-2.5 relative"
+                >
+                  {/* PDF Icon - Always show for chats with documents */}
+                  <motion.div 
+                    className="flex-shrink-0 w-4 h-4 flex items-center justify-center"
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {item.isCollection ? (
+                      <div className="relative">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
+                          <path d="M7 4V2C7 1.45 7.45 1 8 1H16C16.55 1 17 1.45 17 2V4H20C20.55 4 21 4.45 21 5C21 5.55 20.55 6 20 6H19V19C19 20.1 18.1 21 17 21H7C5.9 21 5 20.1 5 19V6H4C3.45 6 3 5.55 3 5C3 4.45 3.45 4 4 4H7ZM9 8V18H15V8H9Z"/>
+                        </svg>
+                        {item.documentCount && item.documentCount > 1 && (
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+                            <span className="text-white text-[8px] font-bold">{item.documentCount}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : item.hasPdf ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-red-500">
+                        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-400">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14,2 14,8 20,8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                        <polyline points="10,9 9,9 8,9"/>
+                      </svg>
+                    )}
+                  </motion.div>
+
+                  {/* Chat Title - Clickable area */}
+                  <div 
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={(e) => {
+                      if (activeMenu === item.id || editingId === item.id) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        return
+                      }
+                      onSelect(item.id); 
+                      if (typeof window !== 'undefined' && window.innerWidth < 768) onClose(); 
+                    }}
+                  >
+                    {editingId === item.id ? (
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenameSubmit(item.id)
+                          } else if (e.key === 'Escape') {
+                            setEditingId(null)
+                            setEditingTitle('')
+                          }
+                        }}
+                        onBlur={() => handleRenameSubmit(item.id)}
+                        className="w-full text-sm font-medium bg-neutral-700 border border-neutral-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-white"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div className="flex items-center">
+                        <span className="text-sm font-medium truncate text-white/90 pr-2">
+                          {item.title}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Three Dots Menu - ChatGPT style */}
+                  <motion.div className="flex-shrink-0 relative">
+                    <motion.button
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        handleMenuClick(e, item.id)
+                      }}
+                      className={`w-7 h-7 rounded-md flex items-center justify-center transition-all duration-200 ${
+                        activeMenu === item.id
+                          ? 'bg-neutral-700 opacity-100' 
+                          : 'opacity-0 group-hover:opacity-100 hover:bg-neutral-700'
+                      }`}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-neutral-400">
+                        <circle cx="5" cy="12" r="2"/>
+                        <circle cx="12" cy="12" r="2"/>
+                        <circle cx="19" cy="12" r="2"/>
+                      </svg>
+                    </motion.button>
+
+                    {/* Dropdown Menu */}
+                    <AnimatePresence>
+                      {activeMenu === item.id && (
+                        <>
+                          {/* Backdrop to close menu */}
+                          <div
+                            className="fixed inset-0 z-[100] bg-transparent"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setActiveMenu(null)
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault()
+                              setActiveMenu(null)
+                            }}
+                          />
+                          
+                          {/* Menu */}
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: -8 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -8 }}
+                            transition={{ duration: 0.1 }}
+                            className="absolute right-0 top-8 w-40 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl z-[101] overflow-hidden"
+                          >
+                            <div className="py-1">
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  handleRename(item.id, item.title)
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-neutral-200 hover:text-white hover:bg-neutral-700 transition-colors flex items-center gap-3"
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+                                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                                </svg>
+                                Rename
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  handleDelete(item.id)
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-neutral-700 transition-colors flex items-center gap-3"
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+                                  <polyline points="3,6 5,6 21,6"/>
+                                  <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"/>
+                                </svg>
+                                Delete
+                              </button>
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                </div>
+              </motion.div>
+            ))}            
           </div>
         </div>
 
@@ -271,9 +478,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, onN
             </svg>
           </motion.button>
         </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-    </>
+      </motion.aside>
+    )}
+  </AnimatePresence>
+  </>
   )
 }

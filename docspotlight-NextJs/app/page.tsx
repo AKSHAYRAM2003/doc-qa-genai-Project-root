@@ -11,6 +11,22 @@ interface ChatMessage {
   content: string;
 }
 
+interface Document {
+  doc_id: string;
+  filename: string;
+  pages: number;
+  upload_time: string;
+  file_size_kb: number;
+  chunks: number;
+}
+
+interface Collection {
+  collection_id: string;
+  name: string;
+  documents: Document[];
+  total_documents: number;
+}
+
 export default function HomePage() {
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState<string | null>(null);
@@ -18,6 +34,15 @@ export default function HomePage() {
   const [loadingAnswer, setLoadingAnswer] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  
+  // Multi-document support
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+  const [showCollectionManager, setShowCollectionManager] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
   const [allMessages, setAllMessages] = useState<Record<string, ChatMessage[]>>({})
   const [sidebarOpen, setSidebarOpen] = useState(true) // Start open by default
   const [isDesktop, setIsDesktop] = useState(true)
@@ -68,6 +93,33 @@ export default function HomePage() {
     try { localStorage.setItem('docspotlight_chats', data) } catch {}
   }, [history, allMessages, activeChatId])
 
+  // Handle chat rename
+  function handleRenameChat(chatId: string, newTitle: string) {
+    setHistory(prev => prev.map(h => 
+      h.id === chatId ? { ...h, title: newTitle } : h
+    ))
+  }
+
+  // Handle chat delete
+  function handleDeleteChat(chatId: string) {
+    setHistory(prev => prev.filter(h => h.id !== chatId))
+    setAllMessages(prev => {
+      const updated = { ...prev }
+      delete updated[chatId]
+      return updated
+    })
+    
+    // If deleting active chat, switch to another or start new
+    if (activeChatId === chatId) {
+      const remaining = history.filter(h => h.id !== chatId)
+      if (remaining.length > 0) {
+        setActiveChatId(remaining[0].id)
+      } else {
+        startNewChat()
+      }
+    }
+  }
+
   function startNewChat() {
     const id = crypto.randomUUID()
     setActiveChatId(id)
@@ -111,7 +163,16 @@ export default function HomePage() {
       const data = await res.json();
       if (!data.doc_id) throw new Error("Bad response from server");
       setDocId(data.doc_id)
-      pushMessage({ id: crypto.randomUUID(), role: 'ai', content: `PDF uploaded successfully! ${data.chunks} chunks processed. Ask me anything about your document.` })
+      
+      // Mark current chat as having a PDF
+      if (activeChatId) {
+        setHistory(h => h.map(i => i.id === activeChatId ? { ...i, hasPdf: true } : i))
+      }
+      
+      // Refresh documents list
+      fetchDocuments();
+      
+      pushMessage({ id: crypto.randomUUID(), role: 'ai', content: `📄 PDF uploaded successfully! **${file.name}** (${data.pages} pages, ${data.chunks} chunks processed). Ask me anything about your document or create collections with multiple documents!` })
     } catch (e: any) {
       alert(e.message)
       setUploadedFileName('') // Clear filename on error
@@ -120,21 +181,114 @@ export default function HomePage() {
     }
   }
 
+  async function fetchDocuments() {
+    try {
+      const res = await fetch('/api/documents');
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(data.documents || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch documents:', e);
+    }
+  }
+
+  async function createCollection() {
+    if (!newCollectionName.trim() || selectedDocs.length === 0) return;
+    
+    setLoadingCollections(true);
+    try {
+      const res = await fetch('/api/collections/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newCollectionName,
+          doc_ids: selectedDocs
+        })
+      });
+      
+      if (res.ok) {
+        const collection = await res.json();
+        setCollections(prev => [...prev, collection]);
+        setNewCollectionName('');
+        setSelectedDocs([]);
+        setShowCollectionManager(false);
+        
+        // Mark current chat as a collection
+        if (activeChatId) {
+          setHistory(h => h.map(i => i.id === activeChatId ? { 
+            ...i, 
+            isCollection: true, 
+            documentCount: collection.documents || selectedDocs.length 
+          } : i))
+        }
+        
+        pushMessage({ 
+          id: crypto.randomUUID(), 
+          role: 'ai', 
+          content: `🗂️ Collection **"${collection.name}"** created with ${collection.documents || selectedDocs.length} documents! You can now query across multiple documents.` 
+        });
+      }
+    } catch (e) {
+      console.error('Failed to create collection:', e);
+    } finally {
+      setLoadingCollections(false);
+    }
+  }
+
+  // Load documents on component mount
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
   async function handleSearch(query: string) {
-    if (!query.trim() || !docId) return
+    if (!query.trim()) return;
+    if (!docId && !selectedCollection) {
+      pushMessage({ 
+        id: crypto.randomUUID(), 
+        role: 'ai', 
+        content: '📝 Please upload a document or select a collection first!' 
+      });
+      return;
+    }
     
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: query }
     pushMessage(userMsg)
     setLoadingAnswer(true)
     try {
+      const requestBody: any = { 
+        question: query,
+        session_id: activeChatId || 'default'
+      };
+      
+      if (selectedCollection) {
+        requestBody.collection_id = selectedCollection;
+      } else {
+        requestBody.doc_id = docId;
+      }
+      
       const res = await fetch('/api/chat', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ question: query, pdf_id: docId }) 
+        body: JSON.stringify(requestBody) 
       })
       if (!res.ok) throw new Error('Chat request failed')
       const data = await res.json()
-      pushMessage({ id: crypto.randomUUID(), role: 'ai', content: data.answer })
+      
+      // Enhanced response formatting
+      let responseContent = data.answer;
+      
+      // Add metadata for multi-document responses
+      if (data.collection_info) {
+        responseContent += `\n\n📊 **Query Info**: Searched ${data.collection_info.documents_searched} documents, found ${data.collection_info.sources_found} relevant sources.`;
+      }
+      
+      // Add citation info if available
+      if (data.enhanced_citations && data.enhanced_citations.length > 0) {
+        responseContent += `\n\n📚 **Sources**: ${data.enhanced_citations.map((cite: any) => `Page ${cite.page}`).join(', ')}`;
+      }
+      
+      pushMessage({ id: crypto.randomUUID(), role: 'ai', content: responseContent })
     } catch (e: any) {
       pushMessage({ id: crypto.randomUUID(), role: 'ai', content: 'Error: ' + e.message })
     } finally {
@@ -158,6 +312,8 @@ export default function HomePage() {
           console.log('Toggle clicked, current state:', sidebarOpen)
           setSidebarOpen(prev => !prev)
         }}
+        onRenameChat={handleRenameChat}
+        onDeleteChat={handleDeleteChat}
       />
       
       <div className={`flex flex-col flex-1 h-full transition-all duration-300 ${
@@ -192,6 +348,11 @@ export default function HomePage() {
             onSearch={handleSearch}
             searchDisabled={loadingAnswer}
             uploadedFileName={uploadedFileName}
+            documents={documents}
+            collections={collections}
+            selectedCollection={selectedCollection}
+            onCollectionSelect={setSelectedCollection}
+            onShowCollectionManager={() => setShowCollectionManager(true)}
           />
         ) : (
           // Chat Section when there are messages
@@ -240,13 +401,17 @@ export default function HomePage() {
               <div className="flex gap-3">
                 <input 
                   name="query"
-                  placeholder={docId ? 'Ask a question about the PDF...' : 'Upload a PDF to start'} 
-                  disabled={!docId || loadingAnswer} 
+                  placeholder={
+                    selectedCollection 
+                      ? 'Ask a question across your document collection...' 
+                      : (docId ? 'Ask a question about the PDF...' : 'Upload a PDF to start')
+                  } 
+                  disabled={(!docId && !selectedCollection) || loadingAnswer} 
                   className="flex-1 rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-600 disabled:opacity-50 font-body" 
                 />
                 <button 
                   type="submit" 
-                  disabled={!docId || loadingAnswer} 
+                  disabled={(!docId && !selectedCollection) || loadingAnswer} 
                   className="px-6 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium disabled:opacity-50 transition-colors font-heading"
                 >
                   Send
@@ -256,6 +421,106 @@ export default function HomePage() {
           </>
         )}
       </div>
+      
+      {/* Collection Manager Modal */}
+      <AnimatePresence>
+        {showCollectionManager && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowCollectionManager(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-neutral-900 rounded-xl border border-neutral-700 p-6 max-w-md w-full max-h-[80vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold text-white">Create Document Collection</h3>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Collection Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newCollectionName}
+                    onChange={(e) => setNewCollectionName(e.target.value)}
+                    placeholder="e.g., Research Papers, Legal Documents"
+                    className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Select Documents ({selectedDocs.length} selected)
+                  </label>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {documents.map((doc) => (
+                      <label key={doc.doc_id} className="flex items-center gap-3 p-2 bg-neutral-800/50 rounded-lg hover:bg-neutral-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedDocs.includes(doc.doc_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedDocs(prev => [...prev, doc.doc_id]);
+                            } else {
+                              setSelectedDocs(prev => prev.filter(id => id !== doc.doc_id));
+                            }
+                          }}
+                          className="w-4 h-4 text-indigo-600"
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm text-white">{doc.filename}</div>
+                          <div className="text-xs text-gray-400">
+                            {doc.pages} pages • {doc.chunks} chunks • {doc.file_size_kb}KB
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                
+                {selectedDocs.length > 0 && (
+                  <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                    <p className="text-sm text-indigo-400">
+                      💡 Collections allow you to query across multiple documents simultaneously. 
+                      The AI will search all selected documents and provide comprehensive answers.
+                    </p>
+                  </div>
+                )}
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCollectionManager(false)}
+                    className="flex-1 px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createCollection}
+                    disabled={!newCollectionName.trim() || selectedDocs.length < 2 || loadingCollections}
+                    className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium disabled:opacity-50 transition-colors"
+                  >
+                    {loadingCollections ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Creating...
+                      </div>
+                    ) : (
+                      'Create Collection'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
