@@ -95,7 +95,10 @@ export default function HomePage() {
         }
         setHistory(parsed.history || [])
         setAllMessages(parsed.messages || {})
-        setActiveChatId(parsed.activeId || null)
+        // Only set activeChatId if it exists in the saved data
+        if (parsed.activeId && parsed.history?.find(h => h.id === parsed.activeId)) {
+          setActiveChatId(parsed.activeId)
+        }
         setChatDocuments(parsed.chatDocuments || {})
       }
     } catch {}
@@ -166,9 +169,12 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    if (!activeChatId) startNewChat()
+    // Only start new chat if there's no activeChatId AND no existing chats in history
+    if (!activeChatId && history.length === 0) {
+      startNewChat()
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChatId])
+  }, [activeChatId, history.length])
 
   function pushMessage(msg: ChatMessage) {
     if (!activeChatId) return
@@ -400,8 +406,40 @@ export default function HomePage() {
         const updatedMessages = currentMessages.slice(0, messageIndex)
         setAllMessages(prev => ({ ...prev, [activeChatId]: updatedMessages }))
         
-        // Now regenerate using the user's question
-        await handleSearch(userMessage.content)
+        // Regenerate response without adding a new user message
+        setLoadingAnswer(true)
+        try {
+          const requestBody: any = { 
+            question: userMessage.content,
+            session_id: activeChatId
+          };
+          
+          if (selectedCollection) {
+            requestBody.collection_id = selectedCollection;
+          } else if (currentChatDocuments.length === 1) {
+            requestBody.doc_id = currentChatDocuments[0].doc_id;
+          } else if (currentChatDocuments.length > 1) {
+            requestBody.doc_ids = currentChatDocuments.map(doc => doc.doc_id);
+          }
+          
+          const endpoint = currentChatDocuments.length > 1 && !selectedCollection ? '/api/chat/multi' : '/api/chat';
+          const res = await fetch(endpoint, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(requestBody) 
+          })
+          if (!res.ok) throw new Error('Chat request failed')
+          const data = await res.json()
+          
+          let responseContent = data.answer;
+          
+          // Add only the new AI response
+          pushMessage({ id: crypto.randomUUID(), role: 'ai', content: responseContent })
+        } catch (e: any) {
+          pushMessage({ id: crypto.randomUUID(), role: 'ai', content: 'Error: ' + e.message })
+        } finally {
+          setLoadingAnswer(false)
+        }
       }
     }
   }
