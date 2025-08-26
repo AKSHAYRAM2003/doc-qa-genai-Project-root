@@ -9,44 +9,65 @@ import { ShiningText } from '../../components/ui/shining-text'
 const TypewriterText = ({ 
   text, 
   delay = 30, 
-  onComplete 
+  onComplete,
+  messageId,
+  isCompleted = false
 }: { 
   text: string; 
   delay?: number; 
-  onComplete?: () => void; 
+  onComplete?: () => void;
+  messageId: string;
+  isCompleted?: boolean;
 }) => {
-  const [displayedText, setDisplayedText] = useState('')
-  const completedRef = useRef(false)
-  const onCompleteRef = useRef(onComplete)
-  
-  // Update the ref when onComplete changes
-  useEffect(() => {
-    onCompleteRef.current = onComplete
-  }, [onComplete])
+  const [displayedText, setDisplayedText] = useState(isCompleted ? text : '')
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lastMessageIdRef = useRef<string | null>(null)
   
   useEffect(() => {
-    // Reset state for new text
-    completedRef.current = false
+    // If already completed from props, show full text immediately
+    if (isCompleted) {
+      setDisplayedText(text)
+      return
+    }
+    
+    // Check if this is a new message (different messageId) or text has changed
+    const isNewMessage = lastMessageIdRef.current !== messageId
+    const isTextChanged = displayedText !== text && text.length > 0
+    lastMessageIdRef.current = messageId
+    
+    // Only animate if this is a new message, text changed, or first render
+    if (!isNewMessage && !isTextChanged && displayedText === text) {
+      return
+    }
+    
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+    }
+    
     let currentIndex = 0
     setDisplayedText('')
     
-    const timer = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       if (currentIndex < text.length) {
         setDisplayedText(text.slice(0, currentIndex + 1))
         currentIndex++
       } else {
-        clearInterval(timer)
-        if (!completedRef.current) {
-          completedRef.current = true
-          onCompleteRef.current?.()
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
         }
+        onComplete?.()
       }
     }, delay)
     
     return () => {
-      clearInterval(timer)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
     }
-  }, [text, delay]) // Remove onComplete from dependencies
+  }, [text, delay, messageId, isCompleted, onComplete])
   
   return <span>{displayedText}</span>
 }
@@ -59,6 +80,7 @@ interface ChatProps {
   onSendMessage: (query: string) => void
   onRegenerateMessage?: (messageId: string) => void
   onBackToHero: () => void
+  isLoadingHistoricalChat?: boolean
 }
 
 export default function Chat({
@@ -68,7 +90,8 @@ export default function Chat({
   documents,
   onSendMessage,
   onRegenerateMessage,
-  onBackToHero
+  onBackToHero,
+  isLoadingHistoricalChat = false
 }: ChatProps) {
   const [inputValue, setInputValue] = useState('')
   const [showDocumentsDialog, setShowDocumentsDialog] = useState(false)
@@ -80,6 +103,7 @@ export default function Chat({
     regenerating: boolean
   }>>({})
   const [completedMessages, setCompletedMessages] = useState<Set<string>>(new Set())
+  const [completedTypewriters, setCompletedTypewriters] = useState<Set<string>>(new Set())
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null)
   const [actionBarDelays, setActionBarDelays] = useState<Record<string, NodeJS.Timeout>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -94,6 +118,7 @@ export default function Chat({
   useEffect(() => {
     // Only keep completed messages that still exist in the current messages array
     const currentMessageIds = new Set(messages.map(msg => msg.id))
+    
     setCompletedMessages(prev => {
       const filtered = new Set<string>()
       prev.forEach(id => {
@@ -101,6 +126,36 @@ export default function Chat({
           filtered.add(id)
         }
       })
+      
+      // If loading historical chat, mark all AI messages as complete immediately
+      if (isLoadingHistoricalChat) {
+        messages.forEach(msg => {
+          if (msg.type === 'ai') {
+            filtered.add(msg.id)
+          }
+        })
+      }
+      
+      return filtered
+    })
+    
+    setCompletedTypewriters(prev => {
+      const filtered = new Set<string>()
+      prev.forEach(id => {
+        if (currentMessageIds.has(id)) {
+          filtered.add(id)
+        }
+      })
+      
+      // If loading historical chat, mark all AI messages as having completed typewriter
+      if (isLoadingHistoricalChat) {
+        messages.forEach(msg => {
+          if (msg.type === 'ai') {
+            filtered.add(msg.id)
+          }
+        })
+      }
+      
       return filtered
     })
     
@@ -115,7 +170,18 @@ export default function Chat({
       })
       return updated
     })
-  }, [messages])
+    
+    // Clean up completed typewriters for removed messages
+    setCompletedTypewriters(prev => {
+      const filtered = new Set<string>()
+      prev.forEach(id => {
+        if (currentMessageIds.has(id)) {
+          filtered.add(id)
+        }
+      })
+      return filtered
+    })
+  }, [messages, isLoadingHistoricalChat])
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -134,7 +200,7 @@ export default function Chat({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim()) return
+    if (!inputValue.trim() || isLoadingHistoricalChat) return
 
     const query = inputValue.trim()
     setInputValue('')
@@ -201,6 +267,20 @@ export default function Chat({
     // Prevent multiple regenerations
     if (messageActions[messageId]?.regenerating) return
     
+    // Clear the completed typewriter for this message so it can animate again
+    setCompletedTypewriters(prev => {
+      const updated = new Set(prev)
+      updated.delete(messageId)
+      return updated
+    })
+    
+    // Clear completed status for action bar
+    setCompletedMessages(prev => {
+      const updated = new Set(prev)
+      updated.delete(messageId)
+      return updated
+    })
+    
     setMessageActions(prev => ({
       ...prev,
       [messageId]: { ...prev[messageId], regenerating: true }
@@ -229,6 +309,9 @@ export default function Chat({
   }
 
   const handleTypewriterComplete = useCallback((messageId: string) => {
+    // Prevent action bar from showing during historical chat loading
+    if (isLoadingHistoricalChat) return
+    
     // Prevent duplicate calls for the same message
     if (completedMessages.has(messageId)) {
       return
@@ -258,7 +341,7 @@ export default function Chat({
       ...prev,
       [messageId]: timeout
     }))
-  }, [completedMessages, actionBarDelays])
+  }, [completedMessages, actionBarDelays, isLoadingHistoricalChat])
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden">
@@ -327,12 +410,23 @@ export default function Chat({
                     </div>
                     <div className="max-w-2xl rounded-full p-2 shadow-lg">
                       <div className="whitespace-pre-wrap text-md font-bold leading-relaxed">
-                        <TypewriterText 
-                          key={`${message.id}-${message.content.length}`}
-                          text={message.content} 
-                          delay={25} 
-                          onComplete={() => handleTypewriterComplete(message.id)}
-                        />
+                        {isLoadingHistoricalChat || completedTypewriters.has(message.id) ? (
+                          // Show content immediately when loading historical chat or already completed
+                          <span>{message.content}</span>
+                        ) : (
+                          // Use typewriter effect for new messages only
+                          <TypewriterText 
+                            key={`${message.id}-${message.content.length}-${completedTypewriters.has(message.id) ? 'completed' : 'new'}`}
+                            text={message.content} 
+                            delay={25} 
+                            messageId={message.id}
+                            isCompleted={false}
+                            onComplete={() => {
+                              setCompletedTypewriters(prev => new Set(prev).add(message.id))
+                              handleTypewriterComplete(message.id)
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
                     

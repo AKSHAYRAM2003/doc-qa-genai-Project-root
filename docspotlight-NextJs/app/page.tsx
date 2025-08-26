@@ -38,6 +38,8 @@ export default function HomePage() {
   const [loadingAnswer, setLoadingAnswer] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [isLoadingHistoricalChat, setIsLoadingHistoricalChat] = useState(false)
+  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false)
   
   // Multi-document support - chat-specific documents
   const [allDocuments, setAllDocuments] = useState<Document[]>([]); // Global documents list
@@ -101,7 +103,10 @@ export default function HomePage() {
         }
         setChatDocuments(parsed.chatDocuments || {})
       }
-    } catch {}
+      setHasLoadedFromStorage(true)
+    } catch {
+      setHasLoadedFromStorage(true)
+    }
   }, [])
 
   // Persist on changes
@@ -169,12 +174,16 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    // Only start new chat if there's no activeChatId AND no existing chats in history
-    if (!activeChatId && history.length === 0) {
+    // Only create a new chat if we've loaded from storage and there are no chats at all
+    if (hasLoadedFromStorage && !activeChatId && history.length === 0) {
       startNewChat()
     }
+    // If there are existing chats but no active chat, select the first one
+    else if (hasLoadedFromStorage && !activeChatId && history.length > 0) {
+      setActiveChatId(history[0].id)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChatId, history.length])
+  }, [activeChatId, history.length, hasLoadedFromStorage])
 
   function pushMessage(msg: ChatMessage) {
     if (!activeChatId) return
@@ -455,7 +464,15 @@ export default function HomePage() {
       <Sidebar
         items={history.map(h => ({ ...h, title: h.title || 'New Chat' }))}
         activeId={activeChatId}
-        onSelect={id => setActiveChatId(id)}
+        onSelect={id => {
+          // Only set loading flag if actually switching to a different chat
+          if (id !== activeChatId) {
+            setIsLoadingHistoricalChat(true)
+            setActiveChatId(id)
+            // Reset the flag after a short delay to allow the chat to load
+            setTimeout(() => setIsLoadingHistoricalChat(false), 100)
+          }
+        }}
         onNew={() => { 
           startNewChat(); 
           if (!isDesktop) setSidebarOpen(false) 
@@ -520,6 +537,7 @@ export default function HomePage() {
             onSendMessage={handleChatSendMessage}
             onRegenerateMessage={handleRegenerateMessage}
             onBackToHero={handleBackToHero}
+            isLoadingHistoricalChat={isLoadingHistoricalChat}
           />
         )}
       </div>
