@@ -313,18 +313,6 @@ export default function HomePage() {
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: query }
     pushMessage(userMsg)
     
-    // Check if this is the first message in the chat - if so, add a welcome message
-    const isFirstMessage = messages.length === 0;
-    if (isFirstMessage && currentChatDocuments.length > 0) {
-      const docNames = currentChatDocuments.map(doc => doc.filename).join(', ');
-      const welcomeMsg: ChatMessage = { 
-        id: crypto.randomUUID(), 
-        role: 'ai', 
-        content: `📄 Great! I can see you've uploaded: **${docNames}**. Let me analyze your question and provide insights from ${currentChatDocuments.length > 1 ? 'these documents' : 'this document'}.`
-      };
-      pushMessage(welcomeMsg);
-    }
-    
     setLoadingAnswer(true)
     try {
       const requestBody: any = { 
@@ -353,16 +341,6 @@ export default function HomePage() {
       
       // Enhanced response formatting
       let responseContent = data.answer;
-      
-      // Add metadata for multi-document responses
-      if (data.collection_info) {
-        responseContent += `\n\n📊 **Query Info**: Searched ${data.collection_info.documents_searched} documents, found ${data.collection_info.sources_found} relevant sources.`;
-      }
-      
-      // Add citation info if available
-      if (data.enhanced_citations && data.enhanced_citations.length > 0) {
-        responseContent += `\n\n📚 **Sources**: ${data.enhanced_citations.map((cite: any) => `Page ${cite.page}`).join(', ')}`;
-      }
       
       pushMessage({ id: crypto.randomUUID(), role: 'ai', content: responseContent })
     } catch (e: any) {
@@ -408,6 +386,26 @@ export default function HomePage() {
     await handleSearch(query)
   }
 
+  // Handler for regenerating AI responses
+  const handleRegenerateMessage = async (messageId: string) => {
+    if (!activeChatId) return
+    
+    const currentMessages = allMessages[activeChatId] || []
+    const messageIndex = currentMessages.findIndex(msg => msg.id === messageId)
+    
+    if (messageIndex > 0) {
+      const userMessage = currentMessages[messageIndex - 1]
+      if (userMessage.role === 'user') {
+        // Remove the AI message being regenerated (and any subsequent messages)
+        const updatedMessages = currentMessages.slice(0, messageIndex)
+        setAllMessages(prev => ({ ...prev, [activeChatId]: updatedMessages }))
+        
+        // Now regenerate using the user's question
+        await handleSearch(userMessage.content)
+      }
+    }
+  }
+
   // Handler to go back to Hero interface
   const handleBackToHero = () => {
     // Start a new chat which will show Hero interface
@@ -432,6 +430,7 @@ export default function HomePage() {
         }}
         onRenameChat={handleRenameChat}
         onDeleteChat={handleDeleteChat}
+        chatDocuments={chatDocuments}
       />
       
       <div className={`flex flex-col flex-1 h-full transition-all duration-300 ${
@@ -481,6 +480,7 @@ export default function HomePage() {
             searchQuery=""
             documents={convertDocuments(currentChatDocuments)}
             onSendMessage={handleChatSendMessage}
+            onRegenerateMessage={handleRegenerateMessage}
             onBackToHero={handleBackToHero}
           />
         )}
