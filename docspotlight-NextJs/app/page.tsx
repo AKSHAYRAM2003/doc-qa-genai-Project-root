@@ -470,7 +470,7 @@ export default function HomePage() {
                   e.currentTarget.reset()
                 }
               }} 
-              className="p-4 border-t border-neutral-800 bg-neutral-900/60 backdrop-blur"
+              className="p-4  border-neutral-800 bg-neutral-900/60 backdrop-blur"
             >
               <div className="flex gap-3">
                 <input 

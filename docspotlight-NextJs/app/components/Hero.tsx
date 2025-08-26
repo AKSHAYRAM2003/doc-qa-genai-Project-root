@@ -161,7 +161,7 @@ export const Hero: React.FC<HeroProps> = ({
                     exit={{ opacity: 0, height: 0 }}
                     className="p-4 border-b border-neutral-700/50"
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
                       {availableDocuments.map((doc: any, index: number) => (
                         <motion.div
                           key={doc.doc_id}
