@@ -21,6 +21,13 @@ interface SidebarProps {
   onToggle: () => void
   onRenameChat?: (id: string, newTitle: string) => void
   onDeleteChat?: (id: string) => void
+  chatDocuments?: Record<string, Array<{
+    doc_id: string
+    filename: string
+    pages: number
+    file_size_kb: number
+    status?: string
+  }>>
 }
 
 const variants = {
@@ -72,7 +79,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClose, 
   onToggle, 
   onRenameChat, 
-  onDeleteChat 
+  onDeleteChat,
+  chatDocuments
 }) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [isMobile, setIsMobile] = useState(false)
@@ -80,6 +88,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editingTitle, setEditingTitle] = useState('')
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const collapsed = !open
+  
+  // Helper function to check if a chat has documents
+  const hasDocuments = (chatId: string): boolean => {
+    return (chatDocuments && chatDocuments[chatId]?.length > 0) || false
+  }
   
   useEffect(() => {
     const checkScreenSize = () => {
@@ -315,10 +328,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           </div>
                         )}
                       </div>
-                    ) : item.hasPdf ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-red-500">
-                        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-                      </svg>
+                    ) : hasDocuments(item.id) ? (
+                      <div className="w-6 h-4 bg-red-700 rounded flex items-center justify-center p-2">
+                        <span className="text-white text-[8px] font-extrabold leading-none tracking-wide">PDF</span>
+                      </div>
                     ) : (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-400">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>

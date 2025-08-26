@@ -1,8 +1,55 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Message, Document } from '../types'
+import { ShiningText } from '../../components/ui/shining-text'
+
+// Typewriter effect component
+const TypewriterText = ({ 
+  text, 
+  delay = 30, 
+  onComplete 
+}: { 
+  text: string; 
+  delay?: number; 
+  onComplete?: () => void; 
+}) => {
+  const [displayedText, setDisplayedText] = useState('')
+  const completedRef = useRef(false)
+  const onCompleteRef = useRef(onComplete)
+  
+  // Update the ref when onComplete changes
+  useEffect(() => {
+    onCompleteRef.current = onComplete
+  }, [onComplete])
+  
+  useEffect(() => {
+    // Reset state for new text
+    completedRef.current = false
+    let currentIndex = 0
+    setDisplayedText('')
+    
+    const timer = setInterval(() => {
+      if (currentIndex < text.length) {
+        setDisplayedText(text.slice(0, currentIndex + 1))
+        currentIndex++
+      } else {
+        clearInterval(timer)
+        if (!completedRef.current) {
+          completedRef.current = true
+          onCompleteRef.current?.()
+        }
+      }
+    }, delay)
+    
+    return () => {
+      clearInterval(timer)
+    }
+  }, [text, delay]) // Remove onComplete from dependencies
+  
+  return <span>{displayedText}</span>
+}
 
 interface ChatProps {
   messages: Message[]
@@ -10,6 +57,7 @@ interface ChatProps {
   searchQuery: string
   documents: Document[]
   onSendMessage: (query: string) => void
+  onRegenerateMessage?: (messageId: string) => void
   onBackToHero: () => void
 }
 
@@ -19,11 +67,21 @@ export default function Chat({
   searchQuery,
   documents,
   onSendMessage,
+  onRegenerateMessage,
   onBackToHero
 }: ChatProps) {
   const [inputValue, setInputValue] = useState('')
   const [showDocumentsDialog, setShowDocumentsDialog] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
+  const [messageActions, setMessageActions] = useState<Record<string, {
+    liked: boolean
+    disliked: boolean
+    copied: boolean
+    regenerating: boolean
+  }>>({})
+  const [completedMessages, setCompletedMessages] = useState<Set<string>>(new Set())
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null)
+  const [actionBarDelays, setActionBarDelays] = useState<Record<string, NodeJS.Timeout>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -31,6 +89,40 @@ export default function Chat({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Reset completed messages when messages change (e.g., regenerate)
+  useEffect(() => {
+    // Only keep completed messages that still exist in the current messages array
+    const currentMessageIds = new Set(messages.map(msg => msg.id))
+    setCompletedMessages(prev => {
+      const filtered = new Set<string>()
+      prev.forEach(id => {
+        if (currentMessageIds.has(id)) {
+          filtered.add(id)
+        }
+      })
+      return filtered
+    })
+    
+    // Clear any pending action bar delays for removed messages
+    setActionBarDelays(prev => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(messageId => {
+        if (!currentMessageIds.has(messageId)) {
+          clearTimeout(updated[messageId])
+          delete updated[messageId]
+        }
+      })
+      return updated
+    })
+  }, [messages])
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(actionBarDelays).forEach(timeout => clearTimeout(timeout))
+    }
+  }, [actionBarDelays])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -61,6 +153,112 @@ export default function Chat({
     const pdfUrl = `http://127.0.0.1:8000/pdf/${doc.doc_id}`
     window.open(pdfUrl, '_blank')
   }
+
+  // Action bar functions
+  const handleCopy = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setMessageActions(prev => ({
+        ...prev,
+        [messageId]: { ...prev[messageId], copied: true }
+      }))
+      
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        setMessageActions(prev => ({
+          ...prev,
+          [messageId]: { ...prev[messageId], copied: false }
+        }))
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy text: ', err)
+    }
+  }
+
+  const handleLike = (messageId: string) => {
+    setMessageActions(prev => ({
+      ...prev,
+      [messageId]: { 
+        ...prev[messageId], 
+        liked: !prev[messageId]?.liked,
+        disliked: false // Clear dislike if liking
+      }
+    }))
+  }
+
+  const handleDislike = (messageId: string) => {
+    setMessageActions(prev => ({
+      ...prev,
+      [messageId]: { 
+        ...prev[messageId], 
+        disliked: !prev[messageId]?.disliked,
+        liked: false // Clear like if disliking
+      }
+    }))
+  }
+
+  const handleRegenerate = async (messageId: string) => {
+    // Prevent multiple regenerations
+    if (messageActions[messageId]?.regenerating) return
+    
+    setMessageActions(prev => ({
+      ...prev,
+      [messageId]: { ...prev[messageId], regenerating: true }
+    }))
+    
+    try {
+      if (onRegenerateMessage) {
+        // Use the proper regenerate handler from parent
+        await onRegenerateMessage(messageId)
+      } else {
+        // Fallback to the old method if no regenerate handler provided
+        const messageIndex = messages.findIndex(msg => msg.id === messageId)
+        if (messageIndex > 0) {
+          const userMessage = messages[messageIndex - 1]
+          if (userMessage.type === 'user') {
+            await onSendMessage(userMessage.content)
+          }
+        }
+      }
+    } finally {
+      setMessageActions(prev => ({
+        ...prev,
+        [messageId]: { ...prev[messageId], regenerating: false }
+      }))
+    }
+  }
+
+  const handleTypewriterComplete = useCallback((messageId: string) => {
+    // Prevent duplicate calls for the same message
+    if (completedMessages.has(messageId)) {
+      return
+    }
+    
+    // Clear any existing delay for this message
+    if (actionBarDelays[messageId]) {
+      clearTimeout(actionBarDelays[messageId])
+    }
+    
+    // Set a delay before showing the action bar to ensure streaming is fully complete
+    const timeout = setTimeout(() => {
+      setCompletedMessages(prev => {
+        if (prev.has(messageId)) {
+          return prev // Already completed
+        }
+        return new Set(prev).add(messageId)
+      })
+      setActionBarDelays(prev => {
+        const updated = { ...prev }
+        delete updated[messageId]
+        return updated
+      })
+    }, 1500) // 1.5 second delay after typewriter completes
+    
+    setActionBarDelays(prev => ({
+      ...prev,
+      [messageId]: timeout
+    }))
+  }, [completedMessages, actionBarDelays])
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden">
@@ -109,44 +307,194 @@ export default function Chat({
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+        <div className="flex-1 overflow-y-auto py-7">
+          <div className="max-w-4xl mx-auto px-4 space-y-6">
+            {messages.map((message) => (
               <div
-                className={`max-w-3xl rounded-2xl px-4 py-3 ${
-                  message.type === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-neutral-800 text-neutral-100'
-                }`}
+                key={message.id}
+                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {message.content}
-                </div>
-                <div className="text-xs opacity-70 mt-2">
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </div>
-              </div>
-            </div>
-          ))}
+                {message.type === 'ai' && (
+                  <div className="flex flex-col items-start mr-17">
+                    {/* DocSpotlight Logo above AI responses */}
+                    <div className="mb-3 flex items-center gap-2">
+                      <img 
+                        src="/logo-white.svg" 
+                        alt="DocSpotlight" 
+                        className="w-4 h-5 ml-2" 
+                      />
+                      <span className="text-sm text-neutral-400 font-medium">DocSpotlight</span>
+                    </div>
+                    <div className="max-w-2xl rounded-full p-2 shadow-lg">
+                      <div className="whitespace-pre-wrap text-md font-bold leading-relaxed">
+                        <TypewriterText 
+                          key={`${message.id}-${message.content.length}`}
+                          text={message.content} 
+                          delay={25} 
+                          onComplete={() => handleTypewriterComplete(message.id)}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* ChatGPT-style Action Bar - Only show after streaming is complete */}
+                    {completedMessages.has(message.id) && (
+                      <div className="flex items-center gap-3 mt-2 ml-2">
+                        {/* Copy Button */}
+                        <div className="relative">
+                          <button
+                            onClick={() => handleCopy(message.id, message.content)}
+                            onMouseEnter={() => setActiveTooltip(`copy-${message.id}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            className="p-2 rounded-lg hover:bg-neutral-800 transition-colors group"
+                          >
+                            <svg className="w-4 h-4 text-neutral-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          </button>
+                          
+                          {/* Copy Tooltip */}
+                          {activeTooltip === `copy-${message.id}` && !messageActions[message.id]?.copied && (
+                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                              Copy
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                            </div>
+                          )}
+                          
+                          {/* Copy Feedback */}
+                          {messageActions[message.id]?.copied && (
+                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-green-600 text-white text-xs rounded whitespace-nowrap">
+                              Copied!
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-green-600"></div>
+                            </div>
+                          )}
+                        </div>
 
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="max-w-3xl rounded-2xl px-4 py-3 bg-neutral-800 text-neutral-100">
-                <div className="flex items-center space-x-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                  <span className="text-sm">AI is thinking...</span>
+                        {/* Like Button */}
+                        <div className="relative">
+                          <button
+                            onClick={() => handleLike(message.id)}
+                            onMouseEnter={() => setActiveTooltip(`like-${message.id}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            className={`p-2 rounded-lg hover:bg-neutral-800 transition-colors group ${
+                              messageActions[message.id]?.liked ? 'bg-neutral-800' : ''
+                            }`}
+                          >
+                            <svg className={`w-4 h-4 transition-colors ${
+                              messageActions[message.id]?.liked 
+                                ? 'text-green-400' 
+                                : 'text-neutral-400 group-hover:text-white'
+                            }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                            </svg>
+                          </button>
+                          
+                          {/* Like Tooltip */}
+                          {activeTooltip === `like-${message.id}` && (
+                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                              {messageActions[message.id]?.liked ? 'Remove like' : 'Good response'}
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Dislike Button */}
+                        <div className="relative">
+                          <button
+                            onClick={() => handleDislike(message.id)}
+                            onMouseEnter={() => setActiveTooltip(`dislike-${message.id}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            className={`p-2 rounded-lg hover:bg-neutral-800 transition-colors group ${
+                              messageActions[message.id]?.disliked ? 'bg-neutral-800' : ''
+                            }`}
+                          >
+                            <svg className={`w-4 h-4 transition-colors ${
+                              messageActions[message.id]?.disliked 
+                                ? 'text-red-400' 
+                                : 'text-neutral-400 group-hover:text-white'
+                            }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018c.163 0 .326.02.485.06L17 4m-7 10v2a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2M17 4h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                            </svg>
+                          </button>
+                          
+                          {/* Dislike Tooltip */}
+                          {activeTooltip === `dislike-${message.id}` && (
+                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                              {messageActions[message.id]?.disliked ? 'Remove dislike' : 'Poor response'}
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Regenerate Button */}
+                        <div className="relative">
+                          <button
+                            onClick={() => handleRegenerate(message.id)}
+                            onMouseEnter={() => setActiveTooltip(`regenerate-${message.id}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            disabled={messageActions[message.id]?.regenerating}
+                            className="p-2 rounded-lg hover:bg-neutral-800 transition-colors group disabled:opacity-50"
+                          >
+                            {messageActions[message.id]?.regenerating ? (
+                              <svg className="w-4 h-4 text-neutral-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                            ) : (
+                              <svg className="w-4 h-4 text-neutral-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                            )}
+                          </button>
+                          
+                          {/* Regenerate Tooltip */}
+                          {activeTooltip === `regenerate-${message.id}` && !messageActions[message.id]?.regenerating && (
+                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                              Regenerate response
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {message.type === 'user' && (
+                  <div className="max-w-2xl rounded-full p-2 bg-neutral-800 text-white ml-15 shadow-lg">
+                    <div className="whitespace-pre-wrap text-md font-bold leading-relaxed">
+                      {message.content}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="flex flex-col items-start mr-18">
+                  {/* DocSpotlight Logo above loading message */}
+                  <div className="mb-3 flex items-center gap-2">
+                    <img 
+                      src="/logo-white.svg" 
+                      alt="DocSpotlight" 
+                      className="w-6 h-6" 
+                    />
+                    <span className="text-sm text-neutral-400 font-medium">DocSpotlight</span>
+                  </div>
+                  <div className="shadow-lg">
+                    <div className="flex items-center space-x-2">
+                      <ShiningText text=" Thinking..." />
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
           <div ref={bottomRef} />
         </div>
 
         {/* Input Form */}
-        <div className="border-t border-neutral-800 bg-neutral-900/60 backdrop-blur">
+        <div className="">
           <div className="max-w-4xl mx-auto p-4">
             <form onSubmit={handleSubmit} className="relative">
               <div className="relative flex items-end bg-neutral-800 rounded-2xl border border-neutral-700 focus-within:border-blue-500/50 transition-colors">
