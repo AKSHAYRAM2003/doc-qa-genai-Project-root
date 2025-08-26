@@ -3,12 +3,15 @@
 import { useState, useRef, useEffect } from "react";
 import { Sidebar, type HistoryItem } from './components/Sidebar'
 import { Hero } from './components/Hero'
+import Chat from './components/Chat'
+import { Message, Document as DocumentType, Chat as ChatType } from './types'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface ChatMessage {
   id: string;
   role: "user" | "ai";
   content: string;
+  timestamp?: number;
 }
 
 interface Document {
@@ -369,6 +372,48 @@ export default function HomePage() {
     }
   }
 
+  // Helper function to convert ChatMessage to Message format
+  const convertToMessages = (chatMessages: ChatMessage[]): Message[] => {
+    return chatMessages.map(msg => ({
+      id: msg.id,
+      type: msg.role === 'user' ? 'user' : 'ai' as const,
+      content: msg.content,
+      timestamp: msg.timestamp || Date.now()
+    }))
+  }
+
+  // Helper function to convert Documents to DocumentType format
+  const convertDocuments = (docs: Document[]): DocumentType[] => {
+    return docs.map(doc => ({
+      doc_id: doc.doc_id,
+      filename: doc.filename,
+      pages: doc.pages,
+      file_size_kb: doc.file_size_kb,
+      status: doc.status as 'ready' | 'processing' | 'error' || 'ready'
+    }))
+  }
+
+  // Convert chats to ChatType format
+  const convertedChats: ChatType[] = history.map(h => ({
+    id: h.id,
+    title: h.title || 'New Chat',
+    messages: convertToMessages(allMessages[h.id] || [])
+  }))
+
+  // Handler for sending messages from ChatInterface
+  const handleChatSendMessage = async (query: string) => {
+    if (!activeChatId) return
+    
+    // Use existing handleSearch logic
+    await handleSearch(query)
+  }
+
+  // Handler to go back to Hero interface
+  const handleBackToHero = () => {
+    // Start a new chat which will show Hero interface
+    startNewChat()
+  }
+
   return (
     <div className="flex h-screen w-full bg-neutral-950">
       <Sidebar
@@ -429,70 +474,15 @@ export default function HomePage() {
             onRemoveDocument={handleRemoveDocument}
           />
         ) : (
-          // Chat Section when there are messages
-          <>
-            <main className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-neutral-950">
-              <AnimatePresence initial={false}>
-                {messages.map(m => (
-                  <motion.div
-                    key={m.id}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.18 }}
-                    className={`${m.role === 'user' ? 'chat-bubble-user ml-auto' : 'chat-bubble-ai'} font-body`}
-                  >
-                    {m.content}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              {loadingAnswer && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="chat-bubble-ai opacity-70 flex items-center gap-2 font-body"
-                >
-                  <div className="w-4 h-4 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin" />
-                  Thinking...
-                </motion.div>
-              )}
-              <div ref={bottomRef} />
-            </main>
-            
-            <form 
-              onSubmit={e => { 
-                e.preventDefault(); 
-                const formData = new FormData(e.currentTarget)
-                const query = formData.get('query') as string
-                if (query?.trim()) {
-                  handleSearch(query.trim())
-                  e.currentTarget.reset()
-                }
-              }} 
-              className="p-4  border-neutral-800 bg-neutral-900/60 backdrop-blur"
-            >
-              <div className="flex gap-3">
-                <input 
-                  name="query"
-                  placeholder={
-                    selectedCollection 
-                      ? 'Ask a question across your document collection...' 
-                      : (docId ? 'Ask a question about the PDF...' : 'Upload a PDF to start')
-                  } 
-                  disabled={(!docId && !selectedCollection) || loadingAnswer} 
-                  className="flex-1 rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-600 disabled:opacity-50 font-body" 
-                />
-                <button 
-                  type="submit" 
-                  disabled={(!docId && !selectedCollection) || loadingAnswer} 
-                  className="px-6 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium disabled:opacity-50 transition-colors font-heading"
-                >
-                  Send
-                </button>
-              </div>
-            </form>
-          </>
+          // Chat Interface when there are messages
+          <Chat
+            messages={convertToMessages(messages)}
+            isLoading={loadingAnswer}
+            searchQuery=""
+            documents={convertDocuments(currentChatDocuments)}
+            onSendMessage={handleChatSendMessage}
+            onBackToHero={handleBackToHero}
+          />
         )}
       </div>
       
