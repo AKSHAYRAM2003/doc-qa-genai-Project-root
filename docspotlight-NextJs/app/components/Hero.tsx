@@ -15,6 +15,7 @@ interface HeroProps {
   selectedCollection?: string | null
   onCollectionSelect?: (collectionId: string | null) => void
   onShowCollectionManager?: () => void
+  onRemoveDocument?: (docId: string) => void
 }
 
 export const Hero: React.FC<HeroProps> = ({ 
@@ -28,41 +29,42 @@ export const Hero: React.FC<HeroProps> = ({
   collections = [],
   selectedCollection,
   onCollectionSelect,
-  onShowCollectionManager
+  onShowCollectionManager,
+  onRemoveDocument
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [showUploadModal, setShowUploadModal] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const [query, setQuery] = useState('')
   const [dragActive, setDragActive] = useState(false)
-  const [uploadedFileName, setUploadedFileName] = useState<string>(propUploadedFileName || '')
-  const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [isComposing, setIsComposing] = useState(false)
 
-  // Update filename when prop changes
+  // Auto-resize textarea
   useEffect(() => {
-    if (propUploadedFileName) {
-      setUploadedFileName(propUploadedFileName)
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
     }
-  }, [propUploadedFileName])
+  }, [query])
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const query = formData.get('query') as string
-    if (query.trim() && docId) {
+    if (query.trim() && !searchDisabled && !isComposing) {
       onSearch(query.trim())
-      e.currentTarget.reset()
+      setQuery('')
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+      e.preventDefault()
+      handleSubmit(e)
     }
   }
 
   const handleFileSelect = (file: File) => {
     if (file.type === 'application/pdf') {
-      setUploadedFileName(file.name)
       onFileUpload(file)
-      setShowUploadModal(false)
     }
-  }
-
-  const handlePlusClick = () => {
-    setShowUploadModal(true)
   }
 
   const handleDrag = (e: React.DragEvent) => {
@@ -86,6 +88,16 @@ export const Hero: React.FC<HeroProps> = ({
     }
   }
 
+  const handleRemoveDocument = (docId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (onRemoveDocument) {
+      onRemoveDocument(docId)
+    }
+  }
+
+  const availableDocuments = documents.filter((doc: any) => doc.doc_id)
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 sm:py-12 bg-gradient-to-b from-neutral-950 via-neutral-900/50 to-neutral-950">
       <motion.div
@@ -100,16 +112,16 @@ export const Hero: React.FC<HeroProps> = ({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="text-3xl sm:text-4xl md:text-6xl font-bold bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent font-editorial"
+            className="text-4xl sm:text-5xl md:text-7xl font-bold bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent font-editorial"
             style={{ 
-              lineHeight: '1.4', 
-              paddingTop: '0.3em', 
-              paddingBottom: '0.3em'
+              lineHeight: '1.2', 
+              paddingTop: '0.2em', 
+              paddingBottom: '0.2em'
             }}
           >
-            Chat with your{' '}
-            <span className="bg-gradient-to-b from-green-500 via-yellow-500 to-blue-500 text-transparent bg-clip-text italic">
-              Documents
+            AI-Powered Document{' '}
+            <span className="bg-gradient-to-b from-green-500 via-yellow-500 to-blue-500 text-transparent bg-clip-text  italic">
+              <span className='font-normal'>I</span>ntelligence
             </span>
           </motion.h1>
           
@@ -117,287 +129,239 @@ export const Hero: React.FC<HeroProps> = ({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-base sm:text-lg md:text-xl text-gray-400 max-w-2xl mx-auto leading-relaxed font-body tracking-tight px-4 sm:px-0"
+            className="text-lg sm:text-xl md:text-md text-gray-300 max-w-3xl mx-auto leading-relaxed font-body tracking-tighter px-4 sm:px-0 font-FK Grotesk Neue font-normal"
           >
-            Upload any PDF and start an intelligent conversation. Get instant answers, 
-            summaries, and insights from your documents with AI-powered search.
+            Transform your <span className='font-editorial font-[10px] bg-gradient-to-r from-yellow-500 via-red-500 to-pink-500 text-transparent bg-clip-text'>PDFs</span> into intelligent conversations. Upload, query, and get 
+            instant insights across multiple documents with advanced AI search.
           </motion.p>
         </div>
 
-        {/* ChatGPT-like Search Bar */}
-        <motion.div
+        {/* Input Area */}
+        <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          className="space-y-4 sm:space-y-6 flex flex-col items-center px-4 sm:px-0"
+          transition={{ duration: 0.6, delay: 0.3 }} 
+          className="relative transition-all duration-300"
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
         >
-          <form onSubmit={handleSubmit} className="w-full max-w-2xl flex justify-center">
-            <motion.div 
-              className={`relative bg-neutral-800/50 border border-neutral-700 rounded-full backdrop-blur-sm transition-all duration-300 w-full ${
-                isSearchFocused 
-                  ? 'border-indigo-500 shadow-lg shadow-indigo-500/20' 
-                  : 'hover:border-neutral-600'
-              }`}
-              initial={{ width: '100%' }}
-              animate={{ 
-                scale: isSearchFocused ? 1.02 : 1
-              }}
-              transition={{ 
-                duration: 0.3, 
-                ease: [0.25, 0.46, 0.45, 0.94]
-              }}
-            >
-              {/* Plus icon for PDF upload */}
-              <button
-                type="button"
-                onClick={handlePlusClick}
-                disabled={uploading}
-                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 text-neutral-400 hover:text-white transition-colors disabled:opacity-50"
-                title="Upload PDF"
-              >
-                <svg width="20" height="20" className="sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M12 8v8"/>
-                  <path d="M8 12h8"/>
-                </svg>
-              </button>
+          <form onSubmit={handleSubmit}>
+            <div className={`relative bg-neutral-800/60 backdrop-blur border border-neutral-700 rounded-3xl transition-all duration-200 ${
+              dragActive ? 'border-blue-500 bg-blue-500/10' : 'hover:border-neutral-600 focus-within:border-neutral-500'
+            }`}>
+              
+              {/* Document Cards - Show inside the input area when documents are uploaded */}
+              <AnimatePresence>
+                {availableDocuments.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="p-4 border-b border-neutral-700/50"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {availableDocuments.map((doc: any, index: number) => (
+                        <motion.div
+                          key={doc.doc_id}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          transition={{ delay: index * 0.1 }}
+                          className={`group relative border rounded-lg p-3 transition-colors ${
+                            doc.status === 'processing' 
+                              ? 'bg-yellow-900/20 border-yellow-600/50' 
+                              : doc.status === 'error'
+                              ? 'bg-red-900/20 border-red-600/50'
+                              : 'bg-neutral-700/30 border-neutral-600/50 hover:border-neutral-500'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0">
+                              {doc.status === 'processing' ? (
+                                <div className="w-6 h-6 bg-yellow-600 rounded flex items-center justify-center">
+                                  <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                                </div>
+                              ) : doc.status === 'error' ? (
+                                <div className="w-6 h-6 bg-red-600 rounded flex items-center justify-center">
+                                  <span className="text-white text-xs font-bold">!</span>
+                                </div>
+                              ) : (
+                                <div className="w-6 h-5 bg-red-800 rounded  flex items-center justify-center">
+                                  <span className="text-white text-[8px] font-extrabold p-5 leading-none tracking-wide">PDF</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-white font-medium text-sm truncate">
+                                {doc.filename}
+                              </h3>
+                              <p className="text-neutral-400 text-xs mt-1">
+                                {doc.status === 'processing' 
+                                  ? 'Processing...' 
+                                  : doc.status === 'error'
+                                  ? 'Processing failed'
+                                  : `${doc.pages} pages • ${Math.round(doc.file_size_kb / 1024 * 10) / 10} MB`
+                                }
+                              </p>
+                            </div>
+                            {/* Remove Button - Show on hover for all documents except processing */}
+                            {doc.status !== 'processing' && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleRemoveDocument(doc.doc_id, e)}
+                                className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full bg-red-500/80 hover:bg-red-500 flex items-center justify-center transition-all duration-200 flex-shrink-0 hover:scale-110"
+                                title="Remove document"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-white">
+                                  <line x1="18" y1="6" x2="6" y2="18"/>
+                                  <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {/* PDF indicator when file is uploaded */}
-              {docId && uploadedFileName && (
-                <div className="absolute left-10 sm:left-16 top-1/2 -translate-y-1/2 flex items-center gap-1 sm:gap-2 bg-red-500/20 border border-red-500/30 rounded-full px-2 sm:px-3 py-1">
-                  <svg width="14" height="14" className="sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14,2 14,8 20,8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10,9 9,9 8,9"/>
-                  </svg>
-                  <span className="text-xs text-red-400 font-medium truncate max-w-16 sm:max-w-32">
-                    {uploadedFileName}
-                  </span>
-                </div>
-              )}
-
-              {/* Input field */}
-                <input
-                name="query"
-                type="text"
-                placeholder={docId ? "Message DocSpotlight..." : "Upload a PDF to start chatting..."}
-                disabled={uploading}
-                onFocus={() => setIsSearchFocused(true)}
-                onBlur={() => setIsSearchFocused(false)}
-                className={`w-full ${docId && uploadedFileName ? 'pl-32 sm:pl-48' : 'pl-12 sm:pl-16'} pr-12 sm:pr-16 py-3 sm:py-5 text-base sm:text-lg font-bold bg-transparent focus:outline-none placeholder-neutral-400 placeholder:text-xs sm:placeholder:text-sm text-white font-body transition-all duration-300 tracking-tight`}
-                />
-
-              {/* Send button */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                type="submit"
-                disabled={!docId || uploading}
-                className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 w-8 h-8 sm:w-10 sm:h-10 bg-white hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:bg-neutral-300 transition-all duration-200 flex items-center justify-center"
-              >
-                <svg width="16" height="16" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 2L11 13"/>
-                  <path d="M22 2l-7 20-4-9-9-4 20-7z"/>
-                </svg>
-              </motion.button>
-            </motion.div>
-          </form>
-
-          {/* Upload status */}
-          {uploading && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-center"
-            >
-              <div className="flex items-center justify-center gap-3 text-sm text-gray-400">
-                <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                Uploading PDF...
-              </div>
-            </motion.div>
-          )}
-
-          {/* Quick Actions - only show when document is uploaded */}
-          {docId && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-              className="flex flex-wrap gap-2 sm:gap-3 justify-center px-4 sm:px-0"
-            >
-              {[
-                "Summarize this document",
-                "What are the key points?",
-                "Find important dates",
-                "Extract main conclusions"
-              ].map((suggestion, index) => (
-                <motion.button
-                  key={index}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => onSearch(suggestion)}
-                  disabled={uploading}
-                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-neutral-800/60 hover:bg-neutral-700/60 text-gray-300 hover:text-white rounded-lg border border-neutral-700 hover:border-neutral-600 transition-all duration-200 disabled:opacity-50 font-body"
-                >
-                  {suggestion}
-                </motion.button>
-              ))}
-            </motion.div>
-          )}
-
-          {/* Multi-Document Collection Management */}
-          {documents.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.3 }}
-              className="w-full max-w-2xl bg-neutral-800/30 rounded-lg border border-neutral-700 p-4 space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-gray-300">🗂️ Document Collections</h3>
+              {/* Main Input Row */}
+              <div className="flex items-end gap-3 p-4">
+                
+                {/* Plus Button */}
                 <button
-                  onClick={onShowCollectionManager}
-                  className="text-xs px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors"
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex-shrink-0 w-10 h-10 bg-neutral-700 hover:bg-neutral-600 rounded-full flex items-center justify-center transition-colors"
+                  disabled={uploading}
                 >
-                  Create Collection
+                  {uploading ? (
+                    <div className="w-5 h-5 border-2 border-neutral-400 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-300">
+                      <line x1="12" y1="5" x2="12" y2="19"/>
+                      <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                  )}
+                </button>
+
+                {/* Text Input */}
+                <div className="flex-1">
+                  <textarea
+                    ref={textareaRef}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={() => setIsComposing(false)}
+                    placeholder={availableDocuments.length > 1 ? "Ask questions across all your documents..." : availableDocuments.length === 1 ? "Ask about your document..." : "Ask DocSpotlight"}
+                    className="w-full bg-transparent border-none outline-none resize-none text-white placeholder-neutral-400 text-base leading-6 min-h-[24px] max-h-40 overflow-y-auto"
+                    rows={1}
+                    disabled={searchDisabled}
+                  />
+                </div>
+
+                {/* Send Button */}
+                <button
+                  type="submit"
+                  disabled={!query.trim() || searchDisabled || uploading || isComposing}
+                  className="flex-shrink-0 w-10 h-10 bg-white hover:bg-neutral-100 disabled:bg-neutral-600 disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-all duration-200 transform hover:scale-105 disabled:scale-100"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={query.trim() && !searchDisabled ? "text-neutral-900" : "text-neutral-400"}>
+                    <line x1="22" y1="2" x2="11" y2="13"/>
+                    <polygon points="22,2 15,22 11,13 2,9 22,2"/>
+                  </svg>
                 </button>
               </div>
-              
-              {/* Collection Selection */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    id="single-doc"
-                    name="source"
-                    checked={!selectedCollection}
-                    onChange={() => onCollectionSelect?.(null)}
-                    className="w-4 h-4 text-indigo-600"
-                  />
-                  <label htmlFor="single-doc" className="text-sm text-gray-300">
-                    Single Document ({uploadedFileName || 'Latest uploaded'})
-                  </label>
-                </div>
-                
-                {collections.map((collection: any) => (
-                  <div key={collection.collection_id} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      id={collection.collection_id}
-                      name="source"
-                      checked={selectedCollection === collection.collection_id}
-                      onChange={() => onCollectionSelect?.(collection.collection_id)}
-                      className="w-4 h-4 text-indigo-600"
-                    />
-                    <label htmlFor={collection.collection_id} className="text-sm text-gray-300">
-                      📚 {collection.name} ({collection.documents || collection.total_documents} docs)
-                    </label>
-                  </div>
-                ))}
-              </div>
-              
-              {selectedCollection && (
-                <p className="text-xs text-indigo-400">
-                  Multi-document mode: Your questions will search across all documents in the collection.
-                </p>
-              )}
-            </motion.div>
-          )}
 
-          {/* Simple helper text */}
-          <p className="text-xs sm:text-sm text-gray-500 text-center font-body px-4 sm:px-0">
-            {docId ? "Ask questions about your uploaded document" : "Upload a PDF to start an intelligent conversation"}
-          </p>
-        </motion.div>
-      </motion.div>
-
-      {/* Upload Modal */}
-      <AnimatePresence>
-        {showUploadModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowUploadModal(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-neutral-900 rounded-xl border border-neutral-700 p-8 max-w-md w-full"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="text-center space-y-6">
-                <h3 className="text-xl font-semibold text-white font-heading">Upload PDF Document</h3>
-                
-                {/* Drag and Drop Area */}
-                <div
-                  className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ${
-                    dragActive 
-                      ? 'border-indigo-500 bg-indigo-500/10' 
-                      : 'border-neutral-600 hover:border-neutral-500 hover:bg-neutral-800/30'
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <div className="flex flex-col items-center space-y-4">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400">
+              {/* Drag Overlay */}
+              {dragActive && (
+                <div className="absolute inset-0 bg-blue-500/20 border-2 border-blue-500 border-dashed rounded-3xl flex items-center justify-center z-10">
+                  <div className="text-blue-400 text-center">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mx-auto mb-2">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                       <polyline points="14,2 14,8 20,8"/>
                       <line x1="16" y1="13" x2="8" y2="13"/>
                       <line x1="16" y1="17" x2="8" y2="17"/>
                       <polyline points="10,9 9,9 8,9"/>
                     </svg>
-                    
-                    <div className="text-center">
-                      <p className="text-white font-medium font-body">
-                        {dragActive ? 'Drop your PDF here' : 'Drag and drop your PDF'}
-                      </p>
-                      <p className="text-sm text-neutral-400 mt-1 font-body">or click to browse</p>
-                    </div>
-                    
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-6 py-2 bg-neutral-600 hover:bg-neutral-500 text-white rounded-full font-medium transition-colors font-heading "
-                    >
-                      Choose File
-                    </button>
+                    <p className="text-sm font-medium">Drop PDF here</p>
                   </div>
                 </div>
-                
-                <p className="text-xs text-neutral-500 font-body">
-                  Supports PDF files up to 10MB
-                </p>
-                
-                {/* Close button */}
-                <button
-                  onClick={() => setShowUploadModal(false)}
-                  className="w-full px-4 py-2 text-neutral-400 hover:text-white transition-colors font-body"
-                >
-                  Cancel
-                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleFileSelect(file)
+            }}
+            className="hidden"
+          />
+        </motion.div>
+
+        {/* Upload Status */}
+        <AnimatePresence>
+          {uploading && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="text-center"
+            >
+              <div className="inline-flex items-center gap-2 text-neutral-400 text-sm">
+                <div className="w-4 h-4 border-2 border-neutral-400 border-t-blue-400 rounded-full animate-spin" />
+                Uploading PDF...
               </div>
-              
-              {/* Hidden file input */}
-              <input 
-                ref={fileInputRef} 
-                type="file" 
-                accept="application/pdf" 
-                className="hidden" 
-                onChange={e => { 
-                  const f = e.target.files?.[0]; 
-                  if (f) handleFileSelect(f) 
-                }} 
-              />
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Collections Section */}
+        {collections.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-8 space-y-4"
+          >
+            <h3 className="text-neutral-400 text-sm font-medium">Collections</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {collections.map((collection: any) => (
+                <button
+                  key={collection.collection_id}
+                  onClick={() => onCollectionSelect?.(collection.collection_id)}
+                  className={`p-4 rounded-xl border text-left transition-all ${
+                    selectedCollection === collection.collection_id
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-neutral-700 bg-neutral-800/50 hover:border-neutral-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-blue-600 rounded-md flex items-center justify-center">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-white">
+                        <path d="M7 4V2C7 1.45 7.45 1 8 1H16C16.55 1 17 1.45 17 2V4H20C20.55 4 21 4.45 21 5C21 5.55 20.55 6 20 6H19V19C19 20.1 18.1 21 17 21H7C5.9 21 5 20.1 5 19V6H4C3.45 6 3 5.55 3 5C3 4.45 3.45 4 4 4H7Z"/>
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-white font-medium text-sm">{collection.name}</h4>
+                      <p className="text-neutral-400 text-xs">{collection.total_documents} documents</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </motion.div>
         )}
-      </AnimatePresence>
+
+      </motion.div>
     </div>
   )
 }

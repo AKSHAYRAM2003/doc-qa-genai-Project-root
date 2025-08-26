@@ -18,6 +18,7 @@ interface Document {
   upload_time: string;
   file_size_kb: number;
   chunks: number;
+  status?: string;
 }
 
 interface Collection {
@@ -35,8 +36,9 @@ export default function HomePage() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   
-  // Multi-document support
-  const [documents, setDocuments] = useState<Document[]>([]);
+  // Multi-document support - chat-specific documents
+  const [allDocuments, setAllDocuments] = useState<Document[]>([]); // Global documents list
+  const [chatDocuments, setChatDocuments] = useState<Record<string, Document[]>>({}); // Chat-specific documents
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
@@ -48,6 +50,9 @@ export default function HomePage() {
   const [isDesktop, setIsDesktop] = useState(true)
   const [mounted, setMounted] = useState(false)
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Get current chat's documents
+  const currentChatDocuments = activeChatId ? (chatDocuments[activeChatId] || []) : [];
 
   // Handle mounting to prevent hydration issues
   useEffect(() => {
@@ -79,19 +84,30 @@ export default function HomePage() {
     try {
       const saved = localStorage.getItem('docspotlight_chats')
       if (saved) {
-        const parsed = JSON.parse(saved) as { history: HistoryItem[]; messages: Record<string, ChatMessage[]>; activeId?: string }
+        const parsed = JSON.parse(saved) as { 
+          history: HistoryItem[]; 
+          messages: Record<string, ChatMessage[]>; 
+          activeId?: string;
+          chatDocuments?: Record<string, Document[]>;
+        }
         setHistory(parsed.history || [])
         setAllMessages(parsed.messages || {})
         setActiveChatId(parsed.activeId || null)
+        setChatDocuments(parsed.chatDocuments || {})
       }
     } catch {}
   }, [])
 
   // Persist on changes
   useEffect(() => {
-    const data = JSON.stringify({ history, messages: allMessages, activeId: activeChatId })
+    const data = JSON.stringify({ 
+      history, 
+      messages: allMessages, 
+      activeId: activeChatId,
+      chatDocuments: chatDocuments
+    })
     try { localStorage.setItem('docspotlight_chats', data) } catch {}
-  }, [history, allMessages, activeChatId])
+  }, [history, allMessages, activeChatId, chatDocuments])
 
   // Handle chat rename
   function handleRenameChat(chatId: string, newTitle: string) {
@@ -104,6 +120,12 @@ export default function HomePage() {
   function handleDeleteChat(chatId: string) {
     setHistory(prev => prev.filter(h => h.id !== chatId))
     setAllMessages(prev => {
+      const updated = { ...prev }
+      delete updated[chatId]
+      return updated
+    })
+    // Clean up chat-specific documents
+    setChatDocuments(prev => {
       const updated = { ...prev }
       delete updated[chatId]
       return updated
@@ -125,6 +147,19 @@ export default function HomePage() {
     setActiveChatId(id)
     setAllMessages(m => ({ ...m, [id]: [] }))
     setHistory(h => [...h, { id, title: 'New Chat', createdAt: Date.now() }])
+    // Initialize empty documents for this new chat
+    setChatDocuments(prev => ({ ...prev, [id]: [] }))
+    // Clear any selected collection for new chat
+    setSelectedCollection(null)
+  }
+
+  // Handle document removal from current chat
+  const handleRemoveDocument = (docId: string) => {
+    if (!activeChatId) return
+    setChatDocuments(prev => ({
+      ...prev,
+      [activeChatId]: prev[activeChatId]?.filter(doc => doc.doc_id !== docId) || []
+    }))
   }
 
   useEffect(() => {
@@ -164,15 +199,33 @@ export default function HomePage() {
       if (!data.doc_id) throw new Error("Bad response from server");
       setDocId(data.doc_id)
       
-      // Mark current chat as having a PDF
+      // Create document object
+      const newDocument: Document = {
+        doc_id: data.doc_id,
+        filename: file.name,
+        pages: data.pages || 0,
+        upload_time: new Date().toISOString(),
+        file_size_kb: Math.round(file.size / 1024),
+        chunks: data.chunks || 0,
+        status: 'ready' // Set status as ready for uploaded documents
+      };
+      
+      // Add to global documents list
+      setAllDocuments(prev => [...prev, newDocument]);
+      
+      // Add to current chat's documents
       if (activeChatId) {
-        setHistory(h => h.map(i => i.id === activeChatId ? { ...i, hasPdf: true } : i))
+        setChatDocuments(prev => ({
+          ...prev,
+          [activeChatId]: [...(prev[activeChatId] || []), newDocument]
+        }));
+        
+        // Mark current chat as having a PDF
+        setHistory(h => h.map(i => i.id === activeChatId ? { ...i, hasPdf: true } : i));
       }
       
-      // Refresh documents list
-      fetchDocuments();
-      
-      pushMessage({ id: crypto.randomUUID(), role: 'ai', content: `📄 PDF uploaded successfully! **${file.name}** (${data.pages} pages, ${data.chunks} chunks processed). Ask me anything about your document or create collections with multiple documents!` })
+      // Don't add any AI message here - just keep the user on Hero interface
+      // The document will be visible in the Hero component
     } catch (e: any) {
       alert(e.message)
       setUploadedFileName('') // Clear filename on error
@@ -186,7 +239,7 @@ export default function HomePage() {
       const res = await fetch('/api/documents');
       if (res.ok) {
         const data = await res.json();
-        setDocuments(data.documents || []);
+        setAllDocuments(data.documents || []);
       }
     } catch (e) {
       console.error('Failed to fetch documents:', e);
@@ -243,7 +296,9 @@ export default function HomePage() {
 
   async function handleSearch(query: string) {
     if (!query.trim()) return;
-    if (!docId && !selectedCollection) {
+    
+    // Check if we have documents in current chat or a selected collection
+    if (currentChatDocuments.length === 0 && !selectedCollection) {
       pushMessage({ 
         id: crypto.randomUUID(), 
         role: 'ai', 
@@ -254,6 +309,19 @@ export default function HomePage() {
     
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: query }
     pushMessage(userMsg)
+    
+    // Check if this is the first message in the chat - if so, add a welcome message
+    const isFirstMessage = messages.length === 0;
+    if (isFirstMessage && currentChatDocuments.length > 0) {
+      const docNames = currentChatDocuments.map(doc => doc.filename).join(', ');
+      const welcomeMsg: ChatMessage = { 
+        id: crypto.randomUUID(), 
+        role: 'ai', 
+        content: `📄 Great! I can see you've uploaded: **${docNames}**. Let me analyze your question and provide insights from ${currentChatDocuments.length > 1 ? 'these documents' : 'this document'}.`
+      };
+      pushMessage(welcomeMsg);
+    }
+    
     setLoadingAnswer(true)
     try {
       const requestBody: any = { 
@@ -263,11 +331,16 @@ export default function HomePage() {
       
       if (selectedCollection) {
         requestBody.collection_id = selectedCollection;
-      } else {
-        requestBody.doc_id = docId;
+      } else if (currentChatDocuments.length === 1) {
+        // Single document
+        requestBody.doc_id = currentChatDocuments[0].doc_id;
+      } else if (currentChatDocuments.length > 1) {
+        // Multiple documents - use multi-document chat
+        requestBody.doc_ids = currentChatDocuments.map(doc => doc.doc_id);
       }
       
-      const res = await fetch('/api/chat', { 
+      const endpoint = currentChatDocuments.length > 1 && !selectedCollection ? '/api/chat/multi' : '/api/chat';
+      const res = await fetch(endpoint, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify(requestBody) 
@@ -348,11 +421,12 @@ export default function HomePage() {
             onSearch={handleSearch}
             searchDisabled={loadingAnswer}
             uploadedFileName={uploadedFileName}
-            documents={documents}
+            documents={currentChatDocuments}
             collections={collections}
             selectedCollection={selectedCollection}
             onCollectionSelect={setSelectedCollection}
             onShowCollectionManager={() => setShowCollectionManager(true)}
+            onRemoveDocument={handleRemoveDocument}
           />
         ) : (
           // Chat Section when there are messages
@@ -460,7 +534,7 @@ export default function HomePage() {
                     Select Documents ({selectedDocs.length} selected)
                   </label>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {documents.map((doc) => (
+                    {allDocuments.map((doc: Document) => (
                       <label key={doc.doc_id} className="flex items-center gap-3 p-2 bg-neutral-800/50 rounded-lg hover:bg-neutral-800 cursor-pointer">
                         <input
                           type="checkbox"
