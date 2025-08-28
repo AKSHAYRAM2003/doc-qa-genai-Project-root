@@ -1,6 +1,7 @@
 'use client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
+import { PanelLeftClose } from 'lucide-react';
 
 export interface HistoryItem {
   id: string
@@ -156,16 +157,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             initial={{ x: -80, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -80, opacity: 0 }}
-            className="hidden md:flex fixed left-0 top-0 h-full w-16 bg-neutral-900/80 backdrop-blur border-r border-neutral-800 z-40 flex-col py-4"
+            className="hidden md:flex fixed left-0 top-0 h-full w-16 bg-neutral-900/80 backdrop-blur border-r border-neutral-800 z-40 flex-col py-4 "
           >
             <div className="flex flex-col gap-2 px-2">
               <IconButton
                 icon={
-                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="3" y1="6" x2="21" y2="6"/>
-                    <line x1="3" y1="12" x2="21" y2="12"/>
-                    <line x1="3" y1="18" x2="21" y2="18"/>
-                  </svg>
+                  <PanelLeftClose />
                 }
                 label="Menu"
                 onClick={onToggle}

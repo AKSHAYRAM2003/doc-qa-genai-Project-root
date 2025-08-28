@@ -109,6 +109,18 @@ export default function Chat({
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Initialize completed typewriters for existing messages on mount
+  useEffect(() => {
+    // Mark all existing AI messages as completed on initial load to prevent re-streaming on reload
+    const existingAIMessages = messages
+      .filter(msg => msg.type === 'ai')
+      .map(msg => msg.id)
+    
+    if (existingAIMessages.length > 0) {
+      setCompletedTypewriters(new Set(existingAIMessages))
+    }
+  }, []) // Only run on mount
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -379,7 +391,7 @@ export default function Chat({
                 
                 {/* Custom Tooltip */}
                 {showTooltip && (
-                   <div className="absolute top-full right-0  px-2 py-2 bg-neutral-900 text-white text-[10px] rounded-full shadow-lg border border-neutral-700 whitespace-nowrap z-50 ">
+                   <div className="absolute top-full right-0  px-2 py-2 bg-white text-black text-sm rounded-full shadow-lg border border-neutral-700 whitespace-nowrap z-50 ">
                     View files in this chat
                     <div className="absolute bottom-full right-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-neutral-900"></div>
                   </div>
@@ -448,17 +460,17 @@ export default function Chat({
                           
                           {/* Copy Tooltip */}
                           {activeTooltip === `copy-${message.id}` && !messageActions[message.id]?.copied && (
-                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
                               Copy
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-b-2 border-transparent border-b-neutral-700"></div>
                             </div>
                           )}
                           
                           {/* Copy Feedback */}
                           {messageActions[message.id]?.copied && (
-                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-green-600 text-white text-xs rounded whitespace-nowrap">
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-green-600 text-white text-xs rounded whitespace-nowrap">
                               Copied!
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-green-600"></div>
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-b-2 border-transparent border-b-green-600"></div>
                             </div>
                           )}
                         </div>
@@ -484,9 +496,9 @@ export default function Chat({
                           
                           {/* Like Tooltip */}
                           {activeTooltip === `like-${message.id}` && (
-                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
                               {messageActions[message.id]?.liked ? 'Remove like' : 'Good response'}
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-b-2 border-transparent border-b-neutral-700"></div>
                             </div>
                           )}
                         </div>
@@ -512,9 +524,9 @@ export default function Chat({
                           
                           {/* Dislike Tooltip */}
                           {activeTooltip === `dislike-${message.id}` && (
-                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
                               {messageActions[message.id]?.disliked ? 'Remove dislike' : 'Poor response'}
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-b-2 border-transparent border-b-neutral-700"></div>
                             </div>
                           )}
                         </div>
@@ -542,9 +554,9 @@ export default function Chat({
                           
                           {/* Regenerate Tooltip */}
                           {activeTooltip === `regenerate-${message.id}` && !messageActions[message.id]?.regenerating && (
-                            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-neutral-700 text-white text-xs rounded whitespace-nowrap">
                               Regenerate response
-                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-2 border-transparent border-t-neutral-700"></div>
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-b-2 border-transparent border-b-neutral-700"></div>
                             </div>
                           )}
                         </div>

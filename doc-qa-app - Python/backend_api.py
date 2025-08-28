@@ -3,6 +3,7 @@
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import tempfile
 import os
@@ -48,6 +49,92 @@ CHUNK_METADATA: Dict[str, List[Dict]] = {}  # doc_id -> chunk metadata (page, po
 # Performance caching
 RESPONSE_CACHE: Dict[str, Dict] = {}  # question_hash -> cached response
 CACHE_TTL = 3600  # 1 hour cache TTL
+
+# Storage directory for persistence
+STORAGE_DIR = Path("storage")
+STORAGE_DIR.mkdir(exist_ok=True)
+
+class DocumentPersistence:
+    """Handles persistence of document metadata and indexes across server restarts."""
+    
+    @staticmethod
+    def save_document_data():
+        """Save document metadata and file mappings to disk."""
+        try:
+            metadata_file = STORAGE_DIR / "doc_metadata.json"
+            files_file = STORAGE_DIR / "doc_files.json"
+            
+            with open(metadata_file, 'w') as f:
+                json.dump(DOC_METADATA, f)
+            
+            with open(files_file, 'w') as f:
+                json.dump(DOC_FILES, f)
+                
+            print(f"[Persistence] Saved metadata for {len(DOC_METADATA)} documents")
+        except Exception as e:
+            print(f"[Persistence] Failed to save: {e}")
+    
+    @staticmethod
+    def load_document_data():
+        """Load document metadata and rebuild indexes from persisted files."""
+        try:
+            metadata_file = STORAGE_DIR / "doc_metadata.json"
+            files_file = STORAGE_DIR / "doc_files.json"
+            
+            if metadata_file.exists() and files_file.exists():
+                with open(metadata_file, 'r') as f:
+                    DOC_METADATA.update(json.load(f))
+                
+                with open(files_file, 'r') as f:
+                    DOC_FILES.update(json.load(f))
+                
+                # Rebuild indexes for existing files
+                DocumentPersistence.rebuild_indexes()
+                
+                print(f"[Persistence] Loaded {len(DOC_METADATA)} documents from storage")
+            else:
+                print("[Persistence] No existing data found")
+        except Exception as e:
+            print(f"[Persistence] Failed to load: {e}")
+    
+    @staticmethod
+    def rebuild_indexes():
+        """Rebuild FAISS indexes and text chunks from saved PDF files."""
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+        
+        for doc_id, file_path in DOC_FILES.items():
+            try:
+                if not os.path.exists(file_path):
+                    print(f"[Persistence] File not found: {file_path}")
+                    continue
+                
+                # Re-extract text and rebuild index
+                reader = pypdf.PdfReader(file_path)
+                pages = []
+                for p in reader.pages:
+                    try:
+                        pages.append(p.extract_text() or '')
+                    except Exception:
+                        pages.append('')
+                
+                full_text = '\n'.join(pages)
+                chunks = [c for c in splitter.split_text(full_text) if c.strip()]
+                
+                # Rebuild index if we have project_id
+                if project_id and chunks:
+                    index = build_index(chunks, project_id)
+                    DOC_TEXT[doc_id] = chunks
+                    DOC_INDEX[doc_id] = index
+                    
+                    # Rebuild citation metadata
+                    CitationTracker.add_chunk_metadata(doc_id, chunks, file_path)
+                    
+                print(f"[Persistence] Rebuilt index for {doc_id}")
+                    
+            except Exception as e:
+                print(f"[Persistence] Failed to rebuild {doc_id}: {e}")
 
 # Phase 3: Smart Routing Logic and Advanced Features
 CONVERSATION_MEMORY: Dict[str, List[Dict]] = {}  # Store conversation history per session
@@ -669,6 +756,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Load persisted document data on startup."""
+    print("[Startup] Loading persisted document data...")
+    DocumentPersistence.load_document_data()
+
 class ChatRequest(BaseModel):
     question: str
     doc_id: str = None  # Optional for multi-document queries
@@ -681,6 +774,7 @@ class ChatRequest(BaseModel):
 DOC_TEXT: Dict[str, List[str]] = {}
 DOC_INDEX: Dict[str, faiss.Index] = {}
 DOC_METADATA: Dict[str, Dict] = {}  # Store PDF metadata
+DOC_FILES: Dict[str, str] = {}  # Store PDF file paths: doc_id -> file_path
 
 class ContextManager:
     """Manages system and document context for enhanced responses."""
@@ -876,12 +970,22 @@ async def upload_pdf(file: UploadFile = File(...)):
     contents = await file.read()
     file_size_kb = len(contents) / 1024
     
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-        tmp.write(contents)
-        tmp_path = tmp.name
+    # Create uploads directory if it doesn't exist
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    
+    # Generate doc_id first
+    doc_id = os.urandom(8).hex()
+    
+    # Save PDF file permanently
+    pdf_filename = f"{doc_id}_{file.filename or 'uploaded.pdf'}"
+    pdf_path = uploads_dir / pdf_filename
+    
+    with open(pdf_path, 'wb') as f:
+        f.write(contents)
     
     try:
-        reader = pypdf.PdfReader(tmp_path)
+        reader = pypdf.PdfReader(str(pdf_path))
         pages = []
         for p in reader.pages:
             try:
@@ -894,12 +998,12 @@ async def upload_pdf(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail='Vertex project not initialized')
         index = build_index(chunks, project_id)
         
-        doc_id = os.urandom(8).hex()
         upload_time = datetime.now().strftime("%Y-%m-%d %I:%M %p")
         
         # Store document data and metadata
         DOC_TEXT[doc_id] = chunks
         DOC_INDEX[doc_id] = index
+        DOC_FILES[doc_id] = str(pdf_path)  # Store file path
         DOC_METADATA[doc_id] = {
             "filename": file.filename or "uploaded.pdf",
             "pages_count": len(reader.pages),
@@ -908,9 +1012,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
         
         # Phase 4: Add enhanced citation tracking
-        CitationTracker.add_chunk_metadata(doc_id, chunks, tmp_path)
+        CitationTracker.add_chunk_metadata(doc_id, chunks, str(pdf_path))
         
-        print(f'[Upload] Stored doc_id={doc_id} chunks={len(chunks)} pages={len(reader.pages)}')
+        print(f'[Upload] Stored doc_id={doc_id} chunks={len(chunks)} pages={len(reader.pages)} file={pdf_path}')
+        
+        # Persist document data to disk
+        DocumentPersistence.save_document_data()
         
         PerformanceMonitor.end_request_timer("upload", start_time)
         
@@ -924,10 +1031,11 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
         
     except Exception as e:
+        # Clean up the saved file if processing fails
+        if pdf_path.exists():
+            pdf_path.unlink()
         PerformanceMonitor.record_error("upload", type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}")
-    finally:
-        os.unlink(tmp_path)
 
 SMALL_TALK_PATTERNS = [
     r'^hi$', r'^hi[.! ]', r'^hello', r'^hey', r'^heyy', r'^heya', r'^yo$', r'^how are',
@@ -1441,6 +1549,24 @@ async def chat(req: ChatRequest):
     PerformanceMonitor.end_request_timer("chat", start_time)
     
     return response
+
+@app.get('/pdf/{doc_id}')
+async def serve_pdf(doc_id: str):
+    """Serve PDF file by document ID."""
+    if doc_id not in DOC_FILES:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    
+    pdf_path = DOC_FILES[doc_id]
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+    
+    filename = DOC_METADATA.get(doc_id, {}).get('filename', 'document.pdf')
+    
+    return FileResponse(
+        path=pdf_path,
+        media_type='application/pdf',
+        filename=filename
+    )
 
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=8000)

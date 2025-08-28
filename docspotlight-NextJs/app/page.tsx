@@ -351,7 +351,14 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify(requestBody) 
       })
-      if (!res.ok) throw new Error('Chat request failed')
+      
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('Document not found. The document may have been removed or the server was restarted. Please re-upload your document.')
+        }
+        throw new Error(`Chat request failed with status ${res.status}`)
+      }
+      
       const data = await res.json()
       
       // Enhanced response formatting
@@ -437,7 +444,14 @@ export default function HomePage() {
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify(requestBody) 
           })
-          if (!res.ok) throw new Error('Chat request failed')
+          
+          if (!res.ok) {
+            if (res.status === 404) {
+              throw new Error('Document not found. The document may have been removed or the server was restarted. Please re-upload your document.')
+            }
+            throw new Error(`Chat request failed with status ${res.status}`)
+          }
+          
           const data = await res.json()
           
           let responseContent = data.answer;
