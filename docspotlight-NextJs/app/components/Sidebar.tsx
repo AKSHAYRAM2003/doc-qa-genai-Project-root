@@ -1,7 +1,9 @@
 'use client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
-import { PanelLeftClose } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, CircleUserRound, User, Settings } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext'
+import { ProfileModal } from './auth/ProfileModal'
 
 export interface HistoryItem {
   id: string
@@ -88,7 +90,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const collapsed = !open
+  const { user, isAuthenticated } = useAuth()
   
   // Helper function to check if a chat has documents
   const hasDocuments = (chatId: string): boolean => {
@@ -157,12 +161,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             initial={{ x: -80, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -80, opacity: 0 }}
-            className="hidden md:flex fixed left-0 top-0 h-full w-16 bg-neutral-900/80 backdrop-blur border-r border-neutral-800 z-40 flex-col py-4 "
+            className="hidden md:flex fixed left-0 top-0 h-full w-16 bg-neutral-900/80 backdrop-blur border-r border-neutral-800 z-40 flex-col py-4"
           >
-            <div className="flex flex-col gap-2 px-2">
+            <div className="flex flex-col gap-2 px-2 ">
               <IconButton
                 icon={
-                  <PanelLeftClose />
+                  <PanelLeftOpen />
                 }
                 label="Menu"
                 onClick={onToggle}
@@ -194,18 +198,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </div>
 
-            {/* Profile at bottom */}
+            {/* Profile at bottom - Only show if authenticated */}
             <div className="mt-auto px-2">
-              <motion.button
-                onClick={onToggle}
-                className="w-full p-2 rounded-lg hover:bg-neutral-800/60 transition-colors"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                  U
-                </div>
-              </motion.button>
+              {isAuthenticated && user && (
+                <motion.button
+                  onClick={() => setShowProfileModal(true)}
+                  className="w-full p-2 rounded-lg hover:bg-neutral-800/60 transition-colors"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                    {user.first_name ? user.first_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
+                  </div>
+                </motion.button>
+              )}
             </div>
           </motion.div>
         )}
@@ -242,11 +248,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </svg>
             ) : (
               // Hamburger icon for all other cases
-              <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="6" x2="21" y2="6"/>
-                <line x1="3" y1="12" x2="21" y2="12"/>
-                <line x1="3" y1="18" x2="21" y2="18"/>
-              </svg>
+              // <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+              //   <line x1="3" y1="6" x2="21" y2="6"/>
+              //   <line x1="3" y1="12" x2="21" y2="12"/>
+              //   <line x1="3" y1="18" x2="21" y2="18"/>
+              // </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-panel-right-open-icon lucide-panel-right-open"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/></svg>
             )}
           </button>
         </div>
@@ -469,28 +476,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Profile Section */}
-        <div className="p-4 border-t border-neutral-800">
-          <motion.button
-            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800/60 transition-all duration-200"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-              U
-            </div>
-            <div className="flex-1 text-left">
-              <div className="text-sm font-medium text-white/90 font-heading">User</div>
-              <div className="text-xs text-neutral-400">Manage account</div>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </motion.button>
-        </div>
+        {/* Profile Section - Only show if user is authenticated */}
+        {isAuthenticated && user && (
+          <div className="p-4 border-t border-neutral-800">
+            <motion.button
+              onClick={() => setShowProfileModal(true)}
+              className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800/60 transition-all duration-200"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                {user.first_name ? user.first_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
+              </div>
+              <div className="flex-1 text-left">
+                <div className="text-sm font-medium text-white/90 font-heading">
+                  {user.first_name && user.last_name 
+                    ? `${user.first_name} ${user.last_name}`
+                    : user.email.split('@')[0]
+                  }
+                </div>
+                <div className="text-xs text-neutral-400">Manage account</div>
+              </div>
+              <Settings className="w-4 h-4 text-neutral-400" />
+            </motion.button>
+          </div>
+        )}
       </motion.aside>
     )}
   </AnimatePresence>
+  
+  {/* Profile Modal */}
+  <ProfileModal 
+    isOpen={showProfileModal} 
+    onClose={() => setShowProfileModal(false)} 
+  />
   </>
   )
 }
