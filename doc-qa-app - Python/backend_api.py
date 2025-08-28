@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastAPI backend for DocSpotlight bridging PDF ingestion, embeddings, and chat."""
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -14,13 +14,20 @@ from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import faiss, numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 from pathlib import Path
 import hashlib
 import re
 import json
 from datetime import datetime
+
+# Phase 1: Authentication imports
+from auth_routes import router as auth_router
+from auth import get_current_active_user, get_current_user
+from models import User
+from database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 load_dotenv()
 
@@ -756,6 +763,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Phase 1: Include authentication routes
+app.include_router(auth_router)
+
 @app.on_event("startup")
 async def startup_event():
     """Load persisted document data on startup."""
@@ -959,6 +969,16 @@ def build_index(chunks: List[str], pid: str):
     index.add(arr)
     return index
 
+def create_simple_faiss_index(chunks: List[str]):
+    """Create a simple FAISS index using fallback embeddings when Vertex AI is not available"""
+    print('[Upload] Creating simple FAISS index with fallback embeddings')
+    embedder = FallbackEmbedder()
+    vecs = embedder.embed_documents(chunks)
+    arr = np.array(vecs, dtype='float32')
+    index = faiss.IndexFlatL2(arr.shape[1])
+    index.add(arr)
+    return index
+
 @app.post('/upload')
 async def upload_pdf(file: UploadFile = File(...)):
     # Phase 4: Enhanced upload with performance monitoring
@@ -994,9 +1014,19 @@ async def upload_pdf(file: UploadFile = File(...)):
                 pages.append('')
         full_text = '\n'.join(pages)
         chunks = [c for c in splitter.split_text(full_text) if c.strip()]
-        if not project_id:
-            raise HTTPException(status_code=500, detail='Vertex project not initialized')
-        index = build_index(chunks, project_id)
+        
+        # Try to build index with Vertex AI, fallback to local embeddings if not available
+        index = None
+        try:
+            if project_id:
+                index = build_index(chunks, project_id)
+            else:
+                print("[Upload] Vertex AI not available, using local embeddings")
+                # Create a simple local index fallback
+                index = create_simple_faiss_index(chunks)
+        except Exception as e:
+            print(f"[Upload] Index building failed: {e}, creating simple index")
+            index = create_simple_faiss_index(chunks)
         
         upload_time = datetime.now().strftime("%Y-%m-%d %I:%M %p")
         
@@ -1035,6 +1065,10 @@ async def upload_pdf(file: UploadFile = File(...)):
         if pdf_path.exists():
             pdf_path.unlink()
         PerformanceMonitor.record_error("upload", type(e).__name__)
+        print(f"[Upload] Error occurred: {str(e)}")
+        print(f"[Upload] Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}")
 
 SMALL_TALK_PATTERNS = [
@@ -1190,12 +1224,18 @@ class ResponseHandlers:
         chunks = DOC_TEXT[doc_id]
         index = DOC_INDEX[doc_id]
         
-        # Embedding and search logic
-        if USE_FAKE:
+        # Embedding and search logic with fallback
+        try:
+            if USE_FAKE:
+                embedder = FallbackEmbedder()
+                q_vec = embedder.embed_query(question)
+            else:
+                embedder = VertexAIEmbeddings(model_name=EMBED_MODEL, project=project_id, location=LOCATION)
+                q_vec = embedder.embed_query(question)
+        except Exception as e:
+            print(f"[Chat] Embedding failed, using fallback: {e}")
+            # Use fallback embedder if Vertex AI fails
             embedder = FallbackEmbedder()
-            q_vec = embedder.embed_query(question)
-        else:
-            embedder = VertexAIEmbeddings(model_name=EMBED_MODEL, project=project_id, location=LOCATION)
             q_vec = embedder.embed_query(question)
         
         distances, indices = index.search(np.array([q_vec], dtype='float32'), k=3)
@@ -1256,7 +1296,7 @@ class ResponseHandlers:
         
         # Use multi-document search if available
         if collection_id in CROSS_DOC_INDEX:
-            # Build query vector
+            # Build query vector with fallback
             try:
                 if USE_FAKE:
                     embedder = FallbackEmbedder()
@@ -1264,6 +1304,11 @@ class ResponseHandlers:
                 else:
                     embedder = VertexAIEmbeddings(model_name=EMBED_MODEL, project=project_id, location=LOCATION)
                     q_vec = embedder.embed_query(question)
+            except Exception as e:
+                print(f"[Chat] Multi-doc embedding failed, using fallback: {e}")
+                # Use fallback embedder if Vertex AI fails
+                embedder = FallbackEmbedder()
+                q_vec = embedder.embed_query(question)
                 
                 # Search across collection
                 results = MultiDocumentManager.search_across_documents(collection_id, np.array(q_vec), k=5)
