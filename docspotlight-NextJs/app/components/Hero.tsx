@@ -1,6 +1,7 @@
 'use client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRef, useState, useEffect } from 'react'
+import { Navbar } from './Navbar'
 
 interface HeroProps {
   onFileUpload: (file: File) => void
@@ -99,13 +100,18 @@ export const Hero: React.FC<HeroProps> = ({
   const availableDocuments = documents.filter((doc: any) => doc.doc_id)
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 sm:py-12 bg-gradient-to-b from-neutral-950 via-neutral-900/50 to-neutral-950">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="max-w-4xl w-full text-center space-y-6 sm:space-y-8"
-      >
+    <div className="flex-1 flex flex-col min-h-screen bg-gradient-to-b from-neutral-950 via-neutral-900/50 to-neutral-950">
+      {/* Navbar */}
+      <Navbar variant="hero" />
+      
+      {/* Main Hero Content */}
+      <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 sm:py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="max-w-4xl w-full text-center space-y-6 sm:space-y-8"
+        >
         {/* Main Heading */}
         <div className="space-y-4 sm:space-y-6 py-4 sm:py-8">
           <motion.h1 
@@ -361,7 +367,8 @@ export const Hero: React.FC<HeroProps> = ({
           </motion.div>
         )}
 
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   )
 }
