@@ -207,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.98 }}
                 >
-                  <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                  <div className="w-8 h-8 border-1 bg-gradient-to-br from-neutral-700 to-neutral-800 rounded-full flex items-center justify-center text-white text-sm font-semibold">
                     {user.first_name ? user.first_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
                   </div>
                 </motion.button>
@@ -485,7 +485,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+              <div className="w-8 h-8 border-1 bg-gradient-to-br from-neutral-700 to-neutral-800 rounded-full flex items-center justify-center text-white text-sm font-semibold">
                 {user.first_name ? user.first_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
               </div>
               <div className="flex-1 text-left">

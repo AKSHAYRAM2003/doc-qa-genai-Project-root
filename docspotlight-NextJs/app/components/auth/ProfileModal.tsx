@@ -163,7 +163,7 @@ export const ProfileModal = ({ isOpen, onClose }: ProfileModalProps) => {
                   onClick={() => setActiveTab('profile')}
                   className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
                     activeTab === 'profile'
-                      ? 'text-white border-b-2 border-purple-400'
+                      ? 'text-white border-b-2 bg-gradient-to-br from-neutral-700 to-neutral-800 '
                       : 'text-neutral-400 hover:text-white'
                   }`}
                 >
@@ -173,7 +173,7 @@ export const ProfileModal = ({ isOpen, onClose }: ProfileModalProps) => {
                   onClick={() => setActiveTab('password')}
                   className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
                     activeTab === 'password'
-                      ? 'text-white border-b-2 border-purple-400'
+                      ? 'text-white border-b-2  bg-gradient-to-br from-neutral-700 to-neutral-800'
                       : 'text-neutral-400 hover:text-white'
                   }`}
                 >
@@ -207,7 +207,7 @@ export const ProfileModal = ({ isOpen, onClose }: ProfileModalProps) => {
                   <div className="space-y-4">
                     {/* User Info */}
                     <div className="flex items-center gap-4 p-4 bg-neutral-800/50 rounded-lg">
-                      <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <div className="w-12 h-12 border-1 bg-gradient-to-br from-neutral-700 to-neutral-800 rounded-full flex items-center justify-center">
                         <User className="w-6 h-6 text-white" />
                       </div>
                       <div>
