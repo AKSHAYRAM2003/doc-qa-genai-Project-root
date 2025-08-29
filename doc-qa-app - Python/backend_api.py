@@ -1613,5 +1613,163 @@ async def serve_pdf(doc_id: str):
         filename=filename
     )
 
+# ====== CHAT PERSISTENCE ENDPOINTS ======
+
+class SaveChatsRequest(BaseModel):
+    """Request model for saving user chats."""
+    chats: dict  # The complete chat data from frontend localStorage
+
+class LoadChatsResponse(BaseModel):
+    """Response model for loading user chats."""
+    chats: dict
+
+@app.post('/api/user/save-chats')
+async def save_user_chats(
+    request: SaveChatsRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Save user's chat history to the database."""
+    try:
+        from sqlalchemy import select, delete
+        from models import Chat as ChatModel, Message as MessageModel, ChatDocument
+        
+        user_id = current_user.user_id
+        chat_data = request.chats
+        
+        # Clear existing chats for this user
+        await db.execute(delete(MessageModel).where(MessageModel.user_id == user_id))
+        await db.execute(delete(ChatDocument).where(ChatDocument.chat_id.in_(
+            select(ChatModel.chat_id).where(ChatModel.user_id == user_id)
+        )))
+        await db.execute(delete(ChatModel).where(ChatModel.user_id == user_id))
+        
+        # Save new chats
+        for chat_item in chat_data.get('history', []):
+            chat_id = chat_item['id']
+            
+            # Create chat record
+            chat_record = ChatModel(
+                chat_id=chat_id,
+                user_id=user_id,
+                title=chat_item.get('title', 'New Chat'),
+                created_at=datetime.fromtimestamp(chat_item.get('createdAt', time.time()) / 1000),
+                last_activity=datetime.now()
+            )
+            db.add(chat_record)
+            
+            # Save messages for this chat
+            messages = chat_data.get('messages', {}).get(chat_id, [])
+            for i, message in enumerate(messages):
+                message_record = MessageModel(
+                    message_id=message['id'],
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    message_type=message['role'],
+                    content=message['content'],
+                    timestamp_created=datetime.fromtimestamp(message.get('timestamp', time.time()) / 1000),
+                    order_index=i
+                )
+                db.add(message_record)
+            
+            # Save chat documents if any
+            chat_documents = chat_data.get('chatDocuments', {}).get(chat_id, [])
+            for doc in chat_documents:
+                chat_doc_record = ChatDocument(
+                    chat_id=chat_id,
+                    doc_id=doc['doc_id'],
+                    added_at=datetime.now()
+                )
+                db.add(chat_doc_record)
+        
+        await db.commit()
+        
+        return {"success": True, "message": "Chats saved successfully"}
+        
+    except Exception as e:
+        await db.rollback()
+        print(f"Error saving chats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save chats: {str(e)}")
+
+@app.get('/api/user/load-chats')
+async def load_user_chats(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+) -> LoadChatsResponse:
+    """Load user's chat history from the database."""
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from models import Chat as ChatModel, Message as MessageModel, ChatDocument
+        
+        user_id = current_user.user_id
+        
+        # Load chats with messages and documents
+        result = await db.execute(
+            select(ChatModel)
+            .where(ChatModel.user_id == user_id)
+            .options(
+                selectinload(ChatModel.messages),
+                selectinload(ChatModel.chat_documents)
+            )
+            .order_by(ChatModel.last_activity.desc())
+        )
+        chats = result.scalars().all()
+        
+        # Format data to match frontend structure
+        history = []
+        messages = {}
+        chat_documents = {}
+        active_id = None
+        
+        for chat in chats:
+            # Add to history
+            history.append({
+                'id': str(chat.chat_id),
+                'title': chat.title,
+                'createdAt': int(chat.created_at.timestamp() * 1000),
+                'hasPdf': len(chat.chat_documents) > 0
+            })
+            
+            # Set first chat as active
+            if active_id is None:
+                active_id = str(chat.chat_id)
+            
+            # Add messages
+            chat_messages = []
+            for msg in sorted(chat.messages, key=lambda x: x.order_index):
+                chat_messages.append({
+                    'id': str(msg.message_id),
+                    'role': msg.message_type,
+                    'content': msg.content,
+                    'timestamp': int(msg.timestamp_created.timestamp() * 1000)
+                })
+            messages[str(chat.chat_id)] = chat_messages
+            
+            # Add chat documents
+            docs = []
+            for chat_doc in chat.chat_documents:
+                # Get document metadata from DOC_METADATA
+                doc_metadata = DOC_METADATA.get(chat_doc.doc_id, {})
+                docs.append({
+                    'doc_id': chat_doc.doc_id,
+                    'filename': doc_metadata.get('filename', 'Unknown'),
+                    'pages': doc_metadata.get('pages'),
+                    'file_size_kb': doc_metadata.get('file_size_kb'),
+                    'upload_time': doc_metadata.get('upload_time')
+                })
+            chat_documents[str(chat.chat_id)] = docs
+        
+        return LoadChatsResponse(chats={
+            'history': history,
+            'messages': messages,
+            'activeId': active_id,
+            'chatDocuments': chat_documents
+        })
+        
+    except Exception as e:
+        print(f"Error loading chats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load chats: {str(e)}")
+
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=8000)
