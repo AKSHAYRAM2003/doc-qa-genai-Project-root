@@ -6,6 +6,8 @@ import { Hero } from './components/Hero'
 import Chat from './components/Chat'
 import { Message, Document as DocumentType, Chat as ChatType } from './types'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useAuth } from './contexts/AuthContext'
+import { saveChats, loadChats, migrateLocalChatsToBackend } from './lib/chatPersistence'
 
 interface ChatMessage {
   id: string;
@@ -32,6 +34,7 @@ interface Collection {
 }
 
 export default function HomePage() {
+  const { isAuthenticated } = useAuth()
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -84,41 +87,50 @@ export default function HomePage() {
   // Current chat messages derived from allMessages
   const messages = allMessages[activeChatId || ''] || []
 
-  // Load persisted chats
+  // Load persisted chats using smart persistence
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('docspotlight_chats')
-      if (saved) {
-        const parsed = JSON.parse(saved) as { 
-          history: HistoryItem[]; 
-          messages: Record<string, ChatMessage[]>; 
-          activeId?: string;
-          chatDocuments?: Record<string, Document[]>;
+    const loadChatData = async () => {
+      try {
+        const chatData = await loadChats(isAuthenticated)
+        if (chatData) {
+          setHistory(chatData.history || [])
+          setAllMessages(chatData.messages || {})
+          // Only set activeChatId if it exists in the saved data
+          if (chatData.activeId && chatData.history?.find(h => h.id === chatData.activeId)) {
+            setActiveChatId(chatData.activeId)
+          }
+          setChatDocuments(chatData.chatDocuments || {})
         }
-        setHistory(parsed.history || [])
-        setAllMessages(parsed.messages || {})
-        // Only set activeChatId if it exists in the saved data
-        if (parsed.activeId && parsed.history?.find(h => h.id === parsed.activeId)) {
-          setActiveChatId(parsed.activeId)
-        }
-        setChatDocuments(parsed.chatDocuments || {})
+      } catch (error) {
+        console.error('Failed to load chat data:', error)
+      } finally {
+        setHasLoadedFromStorage(true)
       }
-      setHasLoadedFromStorage(true)
-    } catch {
-      setHasLoadedFromStorage(true)
     }
-  }, [])
 
-  // Persist on changes
+    loadChatData()
+  }, [isAuthenticated])
+
+  // Migrate local chats to backend on login
   useEffect(() => {
-    const data = JSON.stringify({ 
+    if (isAuthenticated && hasLoadedFromStorage) {
+      migrateLocalChatsToBackend().catch(console.error)
+    }
+  }, [isAuthenticated, hasLoadedFromStorage])
+
+  // Smart persist on changes
+  useEffect(() => {
+    if (!hasLoadedFromStorage) return // Don't save until we've loaded
+
+    const chatData = { 
       history, 
       messages: allMessages, 
       activeId: activeChatId,
       chatDocuments: chatDocuments
-    })
-    try { localStorage.setItem('docspotlight_chats', data) } catch {}
-  }, [history, allMessages, activeChatId, chatDocuments])
+    }
+    
+    saveChats(chatData, isAuthenticated).catch(console.error)
+  }, [history, allMessages, activeChatId, chatDocuments, isAuthenticated, hasLoadedFromStorage])
 
   // Handle chat rename
   function handleRenameChat(chatId: string, newTitle: string) {
