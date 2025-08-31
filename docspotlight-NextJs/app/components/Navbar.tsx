@@ -96,8 +96,8 @@ export const Navbar = ({ variant = 'hero', className = '' }: NavbarProps) => {
                   size="sm"
                   className="group"
                 >
-                  <LogIn className="w-4 h-4 md:mr-2 group-hover:scale-110 transition-transform" />
-                  <span className="hidden md:inline">Login</span>
+                  <LogIn className="w-4 h-4 gap-1 md:mr-2 group-hover:scale-110 transition-transform" />
+                  <span className=" md:inline">Login</span>
                 </Button>
               </Link>
               
@@ -110,7 +110,7 @@ export const Navbar = ({ variant = 'hero', className = '' }: NavbarProps) => {
                     className="group"
                   >
                     <User className="w-4 h-4 md:mr-2 group-hover:scale-110 transition-transform" />
-                    <span className="hidden md:inline">Sign up</span>
+                    <span className=" md:inline gap-1">Sign up</span>
                   </Button>
                 </Link>
               )}

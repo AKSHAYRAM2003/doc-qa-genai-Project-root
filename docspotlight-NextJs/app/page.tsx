@@ -159,7 +159,33 @@ export default function HomePage() {
   }
 
   // Handle chat delete
-  function handleDeleteChat(chatId: string) {
+  async function handleDeleteChat(chatId: string) {
+    try {
+      // Call backend API to delete from database
+      const token = localStorage.getItem('access_token')
+      if (token) {
+        const response = await fetch(`/api/chats/${chatId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          console.error('Failed to delete chat from database:', errorData.error || response.statusText)
+          // Continue with frontend deletion even if backend fails
+        } else {
+          console.log(`Chat ${chatId} deleted from database successfully`)
+        }
+      }
+    } catch (error) {
+      console.error('Error calling delete chat API:', error)
+      // Continue with frontend deletion even if API call fails
+    }
+
+    // Update frontend state
     setHistory(prev => prev.filter(h => h.id !== chatId))
     setAllMessages(prev => {
       const updated = { ...prev }
