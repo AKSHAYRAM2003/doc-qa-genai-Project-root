@@ -1632,7 +1632,7 @@ async def save_user_chats(
     """Save user's chat history to the database."""
     try:
         from sqlalchemy import select, delete
-        from models import Chat as ChatModel, Message as MessageModel, ChatDocument
+        from models import Chat as ChatModel, Message as MessageModel, ChatDocument, Document
         
         user_id = current_user.user_id
         chat_data = request.chats
@@ -1650,7 +1650,7 @@ async def save_user_chats(
             
             # Create chat record
             chat_record = ChatModel(
-                chat_id=chat_id,
+                chat_id=str(chat_id),  # Ensure string conversion
                 user_id=user_id,
                 title=chat_item.get('title', 'New Chat'),
                 created_at=datetime.fromtimestamp(chat_item.get('createdAt', time.time()) / 1000),
@@ -1662,8 +1662,8 @@ async def save_user_chats(
             messages = chat_data.get('messages', {}).get(chat_id, [])
             for i, message in enumerate(messages):
                 message_record = MessageModel(
-                    message_id=message['id'],
-                    chat_id=chat_id,
+                    message_id=str(message['id']),  # Ensure string conversion
+                    chat_id=str(chat_id),  # Ensure string conversion
                     user_id=user_id,
                     message_type=message['role'],
                     content=message['content'],
@@ -1675,12 +1675,39 @@ async def save_user_chats(
             # Save chat documents if any
             chat_documents = chat_data.get('chatDocuments', {}).get(chat_id, [])
             for doc in chat_documents:
-                chat_doc_record = ChatDocument(
-                    chat_id=chat_id,
-                    doc_id=doc['doc_id'],
-                    added_at=datetime.now()
-                )
-                db.add(chat_doc_record)
+                # Check if the document exists in DOC_METADATA (in-memory storage)
+                # This is where uploaded documents are actually stored
+                if doc['doc_id'] in DOC_METADATA:
+                    # Check if document exists in database table, if not create it
+                    from sqlalchemy import select
+                    existing_doc = await db.execute(
+                        select(Document).where(Document.doc_id == doc['doc_id'])
+                    )
+                    if existing_doc.scalar_one_or_none() is None:
+                        # Create document record in database
+                        doc_metadata = DOC_METADATA[doc['doc_id']]
+                        doc_record = Document(
+                            doc_id=doc['doc_id'],
+                            user_id=user_id,
+                            filename=doc.get('filename', doc_metadata.get('filename', 'Unknown')),
+                            file_path=doc_metadata.get('file_path', ''),
+                            file_size=int(doc.get('file_size_kb', 0) * 1024) if doc.get('file_size_kb') else 0,
+                            pages=doc.get('pages', doc_metadata.get('pages', 0)),
+                            upload_time=datetime.now(),
+                            status='processed'
+                        )
+                        db.add(doc_record)
+                        print(f"[Persistence] Created document record for {doc['doc_id']}")
+                    
+                    # Now create the chat-document association
+                    chat_doc_record = ChatDocument(
+                        chat_id=str(chat_id),  # Ensure string conversion
+                        doc_id=doc['doc_id'],
+                        added_at=datetime.now()
+                    )
+                    db.add(chat_doc_record)
+                else:
+                    print(f"[Warning] Skipping chat document {doc['doc_id']} - document not found in DOC_METADATA")
         
         await db.commit()
         
