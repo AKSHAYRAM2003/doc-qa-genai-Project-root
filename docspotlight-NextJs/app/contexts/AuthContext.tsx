@@ -3,6 +3,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
 interface User {
   user_id: string
   email: string
@@ -50,7 +52,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         
         if (token && userData) {
           // Verify token is still valid
-          const response = await fetch('http://localhost:8000/auth/me', {
+          const response = await fetch(`${BACKEND_URL}/auth/me`, {
             headers: {
               'Authorization': `Bearer ${token}`,
             },
@@ -81,7 +83,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, [])
 
   const login = async (email: string, password: string) => {
-    const response = await fetch('http://localhost:8000/auth/login', {
+    const response = await fetch(`${BACKEND_URL}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -104,7 +106,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   const register = async (email: string, password: string, firstName?: string, lastName?: string) => {
-    const response = await fetch('http://localhost:8000/auth/register', {
+    const response = await fetch(`${BACKEND_URL}/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -134,7 +136,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       throw new Error('No access token found')
     }
 
-    const response = await fetch('http://localhost:8000/auth/profile', {
+    const response = await fetch(`${BACKEND_URL}/auth/profile`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -162,7 +164,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       throw new Error('No access token found')
     }
 
-    const response = await fetch('http://localhost:8000/auth/change-password', {
+    const response = await fetch(`${BACKEND_URL}/auth/change-password`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -34,7 +34,7 @@ interface Collection {
 }
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, loading: authLoading } = useAuth()
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -89,10 +89,18 @@ export default function HomePage() {
 
   // Load persisted chats using smart persistence
   useEffect(() => {
+    // Wait for auth loading to complete before loading chats
+    if (authLoading) {
+      console.log('[HomePage] Auth still loading, waiting...')
+      return
+    }
+
     const loadChatData = async () => {
       try {
+        console.log('[HomePage] Loading chats, isAuthenticated:', isAuthenticated)
         const chatData = await loadChats(isAuthenticated)
         if (chatData) {
+          console.log('[HomePage] Loaded chat data:', chatData)
           setHistory(chatData.history || [])
           setAllMessages(chatData.messages || {})
           // Only set activeChatId if it exists in the saved data
@@ -100,27 +108,37 @@ export default function HomePage() {
             setActiveChatId(chatData.activeId)
           }
           setChatDocuments(chatData.chatDocuments || {})
+        } else {
+          console.log('[HomePage] No chat data loaded')
         }
       } catch (error) {
-        console.error('Failed to load chat data:', error)
+        console.error('[HomePage] Failed to load chat data:', error)
       } finally {
+        console.log('[HomePage] Chat loading complete, setting hasLoadedFromStorage to true')
         setHasLoadedFromStorage(true)
       }
     }
 
     loadChatData()
-  }, [isAuthenticated])
+  }, [isAuthenticated, authLoading])
 
   // Migrate local chats to backend on login
   useEffect(() => {
-    if (isAuthenticated && hasLoadedFromStorage) {
+    if (isAuthenticated && hasLoadedFromStorage && !authLoading) {
       migrateLocalChatsToBackend().catch(console.error)
     }
-  }, [isAuthenticated, hasLoadedFromStorage])
+  }, [isAuthenticated, hasLoadedFromStorage, authLoading])
 
   // Smart persist on changes
   useEffect(() => {
-    if (!hasLoadedFromStorage) return // Don't save until we've loaded
+    if (!hasLoadedFromStorage) {
+      console.log('[HomePage] Not saving because hasLoadedFromStorage is false')
+      return // Don't save until we've loaded
+    }
+    if (authLoading) {
+      console.log('[HomePage] Not saving because auth is still loading')
+      return // Don't save while auth is loading
+    }
 
     const chatData = { 
       history, 
@@ -129,8 +147,9 @@ export default function HomePage() {
       chatDocuments: chatDocuments
     }
     
+    console.log('[HomePage] Saving chat data:', chatData)
     saveChats(chatData, isAuthenticated).catch(console.error)
-  }, [history, allMessages, activeChatId, chatDocuments, isAuthenticated, hasLoadedFromStorage])
+  }, [history, allMessages, activeChatId, chatDocuments, isAuthenticated, hasLoadedFromStorage, authLoading])
 
   // Handle chat rename
   function handleRenameChat(chatId: string, newTitle: string) {
@@ -487,6 +506,16 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen w-full bg-neutral-950">
+      {authLoading && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-neutral-800 p-4 rounded-lg">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span className="text-white">Loading authentication...</span>
+            </div>
+          </div>
+        </div>
+      )}
       <Sidebar
         items={history.map(h => ({ ...h, title: h.title || 'New Chat' }))}
         activeId={activeChatId}

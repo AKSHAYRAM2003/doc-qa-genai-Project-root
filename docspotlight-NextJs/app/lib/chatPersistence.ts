@@ -61,10 +61,12 @@ export async function saveChatsToBackend(chatData: ChatData): Promise<void> {
 export async function loadChatsFromBackend(): Promise<ChatData | null> {
   const token = localStorage.getItem('access_token')
   if (!token) {
+    console.log('[ChatPersistence] No access token found')
     return null
   }
 
   try {
+    console.log('[ChatPersistence] Loading chats from backend...')
     const response = await fetch('/api/user/load-chats', {
       method: 'GET',
       headers: {
@@ -73,14 +75,15 @@ export async function loadChatsFromBackend(): Promise<ChatData | null> {
     })
 
     if (!response.ok) {
-      console.error('Failed to load chats from backend')
+      console.error('[ChatPersistence] Failed to load chats from backend, status:', response.status)
       return null
     }
 
     const data = await response.json()
+    console.log('[ChatPersistence] Successfully loaded chats from backend:', data)
     return data.chats
   } catch (error) {
-    console.error('Error loading chats from backend:', error)
+    console.error('[ChatPersistence] Error loading chats from backend:', error)
     return null
   }
 }
@@ -92,24 +95,37 @@ export async function saveChats(
   chatData: ChatData,
   isAuthenticated: boolean
 ): Promise<void> {
-  // Convert null to undefined for activeId
-  const processedChatData = {
+  // Clean up the chat data to prevent errors
+  const cleanedChatData = {
     ...chatData,
-    activeId: chatData.activeId || undefined
+    activeId: chatData.activeId || undefined,
+    // Filter out any invalid document references
+    chatDocuments: Object.fromEntries(
+      Object.entries(chatData.chatDocuments || {}).map(([chatId, docs]) => [
+        chatId,
+        (docs || []).filter(doc => doc && doc.doc_id && doc.doc_id.trim() !== '')
+      ])
+    )
   }
+
+  console.log('[ChatPersistence] saveChats called, isAuthenticated:', isAuthenticated, 'data:', cleanedChatData)
 
   if (isAuthenticated) {
     try {
-      await saveChatsToBackend(processedChatData)
+      console.log('[ChatPersistence] Saving to backend...')
+      await saveChatsToBackend(cleanedChatData)
+      console.log('[ChatPersistence] Successfully saved to backend')
       // Also save to localStorage as backup
-      localStorage.setItem('docspotlight_chats', JSON.stringify(processedChatData))
+      localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
+      console.log('[ChatPersistence] Also saved to localStorage as backup')
     } catch (error) {
-      console.error('Failed to save to backend, saving to localStorage only:', error)
-      localStorage.setItem('docspotlight_chats', JSON.stringify(processedChatData))
+      console.error('[ChatPersistence] Failed to save to backend, saving to localStorage only:', error)
+      localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
     }
   } else {
     // Anonymous users: only use localStorage
-    localStorage.setItem('docspotlight_chats', JSON.stringify(processedChatData))
+    console.log('[ChatPersistence] Saving to localStorage (anonymous user)')
+    localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
   }
 }
 
@@ -117,15 +133,21 @@ export async function saveChats(
  * Smart chat loading: load from backend for authenticated users, localStorage for anonymous
  */
 export async function loadChats(isAuthenticated: boolean): Promise<ChatData | null> {
+  console.log('[ChatPersistence] loadChats called, isAuthenticated:', isAuthenticated)
+  
   if (isAuthenticated) {
     try {
+      console.log('[ChatPersistence] Attempting to load from backend...')
       // Try to load from backend first
       const backendData = await loadChatsFromBackend()
       if (backendData) {
+        console.log('[ChatPersistence] Successfully loaded from backend')
         return backendData
+      } else {
+        console.log('[ChatPersistence] No data from backend, trying localStorage...')
       }
     } catch (error) {
-      console.error('Failed to load from backend, falling back to localStorage:', error)
+      console.error('[ChatPersistence] Failed to load from backend, falling back to localStorage:', error)
     }
   }
 
@@ -133,12 +155,18 @@ export async function loadChats(isAuthenticated: boolean): Promise<ChatData | nu
   try {
     const saved = localStorage.getItem('docspotlight_chats')
     if (saved) {
-      return JSON.parse(saved) as ChatData
+      console.log('[ChatPersistence] Loading from localStorage')
+      const data = JSON.parse(saved) as ChatData
+      console.log('[ChatPersistence] localStorage data:', data)
+      return data
+    } else {
+      console.log('[ChatPersistence] No data in localStorage')
     }
   } catch (error) {
-    console.error('Failed to load from localStorage:', error)
+    console.error('[ChatPersistence] Failed to load from localStorage:', error)
   }
 
+  console.log('[ChatPersistence] No chat data found anywhere')
   return null
 }
 
