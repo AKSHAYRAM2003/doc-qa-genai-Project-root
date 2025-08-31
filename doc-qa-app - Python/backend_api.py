@@ -766,11 +766,11 @@ app.add_middleware(
 # Phase 1: Include authentication routes
 app.include_router(auth_router)
 
-@app.on_event("startup")
-async def startup_event():
-    """Load persisted document data on startup."""
-    print("[Startup] Loading persisted document data...")
-    DocumentPersistence.load_document_data()
+# @app.on_event("startup")
+# async def startup_event():
+#     """Load persisted document data on startup."""
+#     print("[Startup] Loading persisted document data...")
+#     DocumentPersistence.load_document_data()
 
 class ChatRequest(BaseModel):
     question: str
@@ -1637,12 +1637,25 @@ async def save_user_chats(
         user_id = current_user.user_id
         chat_data = request.chats
         
-        # Clear existing chats for this user
-        await db.execute(delete(MessageModel).where(MessageModel.user_id == user_id))
-        await db.execute(delete(ChatDocument).where(ChatDocument.chat_id.in_(
-            select(ChatModel.chat_id).where(ChatModel.user_id == user_id)
-        )))
-        await db.execute(delete(ChatModel).where(ChatModel.user_id == user_id))
+        # Clear existing chats for this user (in correct order to avoid foreign key violations)
+        try:
+            # First get all chat IDs for this user
+            chat_ids_result = await db.execute(
+                select(ChatModel.chat_id).where(ChatModel.user_id == user_id)
+            )
+            chat_ids = [row[0] for row in chat_ids_result.fetchall()]
+            
+            if chat_ids:
+                print(f"[Chat Save] Clearing {len(chat_ids)} existing chats for user {user_id}")
+                # Delete in correct order: messages first, then chat_documents, then chats
+                await db.execute(delete(MessageModel).where(MessageModel.chat_id.in_(chat_ids)))
+                await db.execute(delete(ChatDocument).where(ChatDocument.chat_id.in_(chat_ids)))
+                await db.execute(delete(ChatModel).where(ChatModel.chat_id.in_(chat_ids)))
+                print(f"[Chat Save] Successfully cleared existing chats")
+        except Exception as clear_error:
+            print(f"[Chat Save] Error clearing existing chats: {clear_error}")
+            # Continue anyway, as we might be able to save new chats
+            pass
         
         # Save new chats
         for chat_item in chat_data.get('history', []):
@@ -1798,5 +1811,65 @@ async def load_user_chats(
         print(f"Error loading chats: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to load chats: {str(e)}")
 
-if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+@app.delete('/api/user/chats/{chat_id}')
+async def delete_user_chat(
+    chat_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Delete a specific chat and all associated data (messages, chat_documents) from the database."""
+    try:
+        from sqlalchemy import select, delete
+        from models import Chat as ChatModel, Message as MessageModel, ChatDocument
+        
+        user_id = current_user.user_id
+        
+        # First verify the chat belongs to the current user
+        chat_result = await db.execute(
+            select(ChatModel).where(
+                ChatModel.chat_id == chat_id,
+                ChatModel.user_id == user_id
+            )
+        )
+        chat = chat_result.scalar_one_or_none()
+        
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found or access denied")
+        
+        print(f"[Chat Delete] Deleting chat {chat_id} for user {user_id}")
+        
+        # Delete in correct order to avoid foreign key violations
+        # 1. Delete messages first
+        messages_deleted = await db.execute(
+            delete(MessageModel).where(MessageModel.chat_id == chat_id)
+        )
+        print(f"[Chat Delete] Deleted {messages_deleted.rowcount} messages")
+        
+        # 2. Delete chat-document associations
+        chat_docs_deleted = await db.execute(
+            delete(ChatDocument).where(ChatDocument.chat_id == chat_id)
+        )
+        print(f"[Chat Delete] Deleted {chat_docs_deleted.rowcount} chat-document associations")
+        
+        # 3. Finally delete the chat itself
+        chat_deleted = await db.execute(
+            delete(ChatModel).where(ChatModel.chat_id == chat_id)
+        )
+        print(f"[Chat Delete] Deleted chat {chat_id}")
+        
+        await db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Chat {chat_id} deleted successfully",
+            "deleted_messages": messages_deleted.rowcount,
+            "deleted_chat_docs": chat_docs_deleted.rowcount
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        print(f"Error deleting chat {chat_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chat: {str(e)}")
