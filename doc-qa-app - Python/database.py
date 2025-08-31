@@ -82,8 +82,9 @@ async def drop_tables():
 async def check_connection():
     """Check if database connection is working."""
     try:
+        from sqlalchemy import text
         async with AsyncSessionLocal() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         print("[Database] Connection successful")
         return True
     except Exception as e:

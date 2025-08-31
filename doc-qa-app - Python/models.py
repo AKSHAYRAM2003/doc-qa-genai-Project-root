@@ -51,7 +51,7 @@ class Chat(Base):
     """Chat sessions associated with users."""
     __tablename__ = "chats"
     
-    chat_id = Column(PostgreSQL_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(String(255), primary_key=True)  # Changed to String to match frontend UUIDs
     user_id = Column(PostgreSQL_UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     title = Column(String(500), nullable=False)
     created_at = Column(DateTime, default=func.now())
@@ -68,8 +68,8 @@ class Message(Base):
     """Individual messages within chats."""
     __tablename__ = "messages"
     
-    message_id = Column(PostgreSQL_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    chat_id = Column(PostgreSQL_UUID(as_uuid=True), ForeignKey("chats.chat_id"), nullable=False)
+    message_id = Column(String(255), primary_key=True)  # Changed to String to match frontend UUIDs
+    chat_id = Column(String(255), ForeignKey("chats.chat_id"), nullable=False)  # Changed to String
     user_id = Column(PostgreSQL_UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     message_type = Column(String(10), nullable=False)  # 'user' or 'ai'
     content = Column(Text, nullable=False)
@@ -102,7 +102,7 @@ class ChatDocument(Base):
     __tablename__ = "chat_documents"
     
     id = Column(PostgreSQL_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    chat_id = Column(PostgreSQL_UUID(as_uuid=True), ForeignKey("chats.chat_id"), nullable=False)
+    chat_id = Column(String(255), ForeignKey("chats.chat_id"), nullable=False)  # Changed to String
     doc_id = Column(String(255), ForeignKey("documents.doc_id"), nullable=False)
     added_at = Column(DateTime, default=func.now())
     
