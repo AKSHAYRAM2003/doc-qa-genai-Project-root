@@ -24,3 +24,6 @@ psycopg2-binary
 greenlet
 pydantic[email]
 email-validator
+
+# Email service for password reset
+resend
