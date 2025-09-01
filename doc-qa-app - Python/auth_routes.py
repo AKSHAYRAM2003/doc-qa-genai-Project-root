@@ -11,11 +11,14 @@ from database import get_async_db
 from auth import (
     verify_password, get_password_hash, create_access_token, 
     create_refresh_token, get_current_active_user, authenticate_user,
-    validate_password, is_valid_email, create_user_session
+    validate_password, is_valid_email, create_user_session,
+    is_allowed_email_domain, validate_required_fields
 )
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
+import os
+import resend
 
 # Create router
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -24,8 +27,8 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    first_name: str  # Required field
+    last_name: str   # Required field
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -65,6 +68,88 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
+# Email service functions
+resend.api_key = "re_jFqGbL1p_4rZhZAYpECU1XfBfifAbBBtg"
+
+def send_password_reset_email(email: str, first_name: str, reset_token: str):
+    """Send password reset email using Resend."""
+    
+    reset_url = f"http://localhost:3001/auth/reset-password?token={reset_token}"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }}
+            .button {{ display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+            .footer {{ text-align: center; margin-top: 30px; font-size: 12px; color: #666; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🔐 DocSpotlight Password Reset</h1>
+            </div>
+            <div class="content">
+                <h2>Hello {first_name}!</h2>
+                <p>We received a request to reset your password for your DocSpotlight account.</p>
+                <p>Click the button below to reset your password:</p>
+                <p style="text-align: center;">
+                    <a href="{reset_url}" class="button">Reset Password</a>
+                </p>
+                <p><strong>This link will expire in 1 hour for security reasons.</strong></p>
+                <p>If you didn't request this password reset, you can safely ignore this email.</p>
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+                <p style="font-size: 14px; color: #666;">
+                    If the button doesn't work, copy and paste this link in your browser:<br>
+                    <a href="{reset_url}" style="color: #667eea;">{reset_url}</a>
+                </p>
+            </div>
+            <div class="footer">
+                <p>This email was sent by DocSpotlight. If you have questions, please contact our support team.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text_content = f"""
+    DocSpotlight Password Reset
+    
+    Hello {first_name}!
+    
+    We received a request to reset your password for your DocSpotlight account.
+    
+    Please click on the following link to reset your password:
+    {reset_url}
+    
+    This link will expire in 1 hour for security reasons.
+    
+    If you didn't request this password reset, you can safely ignore this email.
+    
+    ---
+    This email was sent by DocSpotlight.
+    """
+    
+    try:
+        email_data = {
+            "from": "DocSpotlight <onboarding@resend.dev>",
+            "to": [email],
+            "subject": "🔐 Reset Your DocSpotlight Password",
+            "html": html_content,
+            "text": text_content
+        }
+        response = resend.Emails.send(email_data)
+        print(f"[Email] Password reset email sent successfully to {email}. Response: {response}")
+        return response
+    except Exception as e:
+        print(f"[Email] Failed to send password reset email to {email}: {e}")
+        raise e
+
 # Authentication endpoints
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
@@ -74,11 +159,31 @@ async def register_user(
 ):
     """Register a new user account."""
     
+    # Validate required fields
+    is_valid_req, req_message = validate_required_fields(
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        email=user_data.email,
+        password=user_data.password
+    )
+    if not is_valid_req:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=req_message
+        )
+    
     # Validate email format
     if not is_valid_email(user_data.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email format"
+        )
+    
+    # Validate email domain restriction
+    if not is_allowed_email_domain(user_data.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email must be from gmail.com domain"
         )
     
     # Validate password strength
@@ -102,8 +207,8 @@ async def register_user(
     new_user = User(
         email=user_data.email.lower(),
         password_hash=hashed_password,
-        first_name=user_data.first_name,
-        last_name=user_data.last_name,
+        first_name=user_data.first_name.strip(),
+        last_name=user_data.last_name.strip(),
         is_active=True,
         is_verified=False  # Email verification can be added later
     )
@@ -131,6 +236,24 @@ async def login_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Authenticate user and return access tokens."""
+    
+    # Validate required fields
+    is_valid_req, req_message = validate_required_fields(
+        email=user_data.email,
+        password=user_data.password
+    )
+    if not is_valid_req:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=req_message
+        )
+    
+    # Validate email domain restriction
+    if not is_allowed_email_domain(user_data.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email must be from gmail.com domain"
+        )
     
     # Authenticate user
     user = await authenticate_user(user_data.email.lower(), user_data.password, db)
@@ -289,6 +412,13 @@ async def forgot_password(
 ):
     """Send password reset email to user."""
     
+    # Validate email domain restriction
+    if not is_allowed_email_domain(request.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email must be from gmail.com domain"
+        )
+    
     # Find user by email
     result = await db.execute(select(User).where(User.email == request.email.lower()))
     user = result.scalar_one_or_none()
@@ -306,13 +436,16 @@ async def forgot_password(
     # Generate reset token (valid for 1 hour)
     reset_token = create_access_token(
         data={"sub": str(user.user_id), "purpose": "reset"}, 
-        expires_delta=datetime.timedelta(hours=1)
+        expires_delta=timedelta(hours=1)
     )
     
-    # In a real app, you would send an email with the reset link
-    # For now, we'll just log it (in production, use proper email service)
-    print(f"[Auth] Password reset token for {user.email}: {reset_token}")
-    print(f"[Auth] Reset link: http://localhost:3000/auth/reset-password?token={reset_token}")
+    # Send email using Resend
+    try:
+        send_password_reset_email(user.email, user.first_name, reset_token)
+        print(f"[Auth] Password reset email sent to: {user.email}")
+    except Exception as e:
+        print(f"[Auth] Failed to send password reset email to {user.email}: {e}")
+        # Don't reveal the error to the user for security
     
     return {"message": "If the email exists, a password reset link has been sent"}
 

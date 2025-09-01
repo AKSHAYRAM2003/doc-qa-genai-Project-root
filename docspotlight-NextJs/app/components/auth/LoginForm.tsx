@@ -25,6 +25,8 @@ export const LoginForm = ({ onSubmit, loading = false }: LoginFormProps) => {
       newErrors.email = 'Email is required'
     } else if (!/\S+@\S+\.\S+/.test(email)) {
       newErrors.email = 'Please enter a valid email'
+    } else if (!email.toLowerCase().endsWith('@gmail.com')) {
+      newErrors.email = 'Email must be from gmail.com domain'
     }
     
     if (!password) {
@@ -79,17 +81,22 @@ export const LoginForm = ({ onSubmit, loading = false }: LoginFormProps) => {
           )}
           
           <div className="space-y-4">
-            <Input
-              type="email"
-              label="Email"
-              placeholder="Enter your email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              error={errors.email}
-              leftIcon={<Mail className="w-5 h-5" />}
-              autoComplete="email"
-              disabled={loading}
-            />
+            <div>
+              <Input
+                type="email"
+                label="Email"
+                placeholder="your.email@gmail.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                error={errors.email}
+                leftIcon={<Mail className="w-5 h-5" />}
+                autoComplete="email"
+                disabled={loading}
+              />
+              <p className="text-xs text-neutral-500 mt-1">
+                📧 Only emails from gmail.com domain are allowed
+              </p>
+            </div>
             
             <Input
               type="password"

@@ -75,6 +75,8 @@ export const SignupForm = ({ onSubmit, loading = false }: SignupFormProps) => {
       newErrors.email = 'Email is required'
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       newErrors.email = 'Please enter a valid email'
+    } else if (!formData.email.toLowerCase().endsWith('@gmail.com')) {
+      newErrors.email = 'Email must be from gmail.com domain'
     }
     
     if (!formData.firstName) {
@@ -189,17 +191,22 @@ export const SignupForm = ({ onSubmit, loading = false }: SignupFormProps) => {
             />
           </div>
           
-          <Input
-            type="email"
-            label="Email"
-            placeholder="john.doe@example.com"
-            value={formData.email}
-            onChange={(e) => updateFormData('email', e.target.value)}
-            error={errors.email}
-            leftIcon={<Mail className="w-5 h-5" />}
-            autoComplete="email"
-            disabled={loading}
-          />
+          <div>
+            <Input
+              type="email"
+              label="Email"
+              placeholder="john.doe@gmail.com"
+              value={formData.email}
+              onChange={(e) => updateFormData('email', e.target.value)}
+              error={errors.email}
+              leftIcon={<Mail className="w-5 h-5" />}
+              autoComplete="email"
+              disabled={loading}
+            />
+            <p className="text-xs text-neutral-500 mt-1">
+              📧 Only emails from gmail.com domain are allowed
+            </p>
+          </div>
           
           <div>
             <Input

@@ -203,3 +203,21 @@ def is_valid_email(email: str) -> bool:
     import re
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
+
+def is_allowed_email_domain(email: str) -> bool:
+    """Check if email domain is allowed (gmail.com only)."""
+    allowed_domains = ["gmail.com"]
+    email_lower = email.lower()
+    return any(email_lower.endswith(f"@{domain}") for domain in allowed_domains)
+
+def validate_required_fields(first_name: str = None, last_name: str = None, email: str = None, password: str = None) -> tuple[bool, str]:
+    """Validate that all required fields are provided and not empty."""
+    if not email or not email.strip():
+        return False, "Email is required"
+    if not password or not password.strip():
+        return False, "Password is required"
+    if first_name is not None and (not first_name or not first_name.strip()):
+        return False, "First name is required"
+    if last_name is not None and (not last_name or not last_name.strip()):
+        return False, "Last name is required"
+    return True, "All required fields are valid"
