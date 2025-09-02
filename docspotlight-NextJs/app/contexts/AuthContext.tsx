@@ -183,11 +183,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   const logout = () => {
-    // Use secure logout that clears all chat data to prevent data leakage
-    import('../lib/chatPersistence').then(({ clearChatsOnLogout }) => {
-      clearChatsOnLogout()
-    })
-    
+    // Only remove auth tokens, preserve chat data 
+    // (chat data for authenticated users is now stored in backend)
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user')
     setUser(null)
     router.push('/auth/login')
   }

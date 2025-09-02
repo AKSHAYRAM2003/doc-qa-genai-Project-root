@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const response = await fetch('http://localhost:8000/documents', {
       method: 'GET',

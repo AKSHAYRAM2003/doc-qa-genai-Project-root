@@ -56,53 +56,6 @@ export async function saveChatsToBackend(chatData: ChatData): Promise<void> {
 }
 
 /**
- * Get user-specific localStorage key for anonymous users
- */
-function getAnonymousUserKey(): string {
-  // Create a simple anonymous session ID that persists for the browser session
-  let sessionId = sessionStorage.getItem('anonymous_session_id')
-  if (!sessionId) {
-    sessionId = 'anon_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-    sessionStorage.setItem('anonymous_session_id', sessionId)
-  }
-  return `docspotlight_chats_${sessionId}`
-}
-
-/**
- * Get user-specific localStorage key
- */
-function getUserSpecificKey(userId?: string): string {
-  if (userId) {
-    return `docspotlight_chats_user_${userId}`
-  }
-  return getAnonymousUserKey()
-}
-
-/**
- * Clear all chat-related localStorage data (for security)
- */
-function clearAllChatLocalStorage(): void {
-  const keysToRemove: string[] = []
-  
-  // Find all chat-related keys
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (key && (key.startsWith('docspotlight_chats') || key === 'docspotlight_chats')) {
-      keysToRemove.push(key)
-    }
-  }
-  
-  // Remove all found keys
-  keysToRemove.forEach(key => {
-    localStorage.removeItem(key)
-    console.log(`[ChatPersistence] Cleared localStorage key: ${key}`)
-  })
-  
-  // Also clear session storage
-  sessionStorage.removeItem('anonymous_session_id')
-}
-
-/**
  * Load user's chat data from the backend
  */
 export async function loadChatsFromBackend(): Promise<ChatData | null> {
@@ -140,8 +93,7 @@ export async function loadChatsFromBackend(): Promise<ChatData | null> {
  */
 export async function saveChats(
   chatData: ChatData,
-  isAuthenticated: boolean,
-  userId?: string
+  isAuthenticated: boolean
 ): Promise<void> {
   // Clean up the chat data to prevent errors
   const cleanedChatData = {
@@ -156,76 +108,65 @@ export async function saveChats(
     )
   }
 
-  console.log('[ChatPersistence] saveChats called, isAuthenticated:', isAuthenticated, 'userId:', userId)
+  console.log('[ChatPersistence] saveChats called, isAuthenticated:', isAuthenticated, 'data:', cleanedChatData)
 
   if (isAuthenticated) {
     try {
-      console.log('[ChatPersistence] Saving to backend for authenticated user...')
+      console.log('[ChatPersistence] Saving to backend...')
       await saveChatsToBackend(cleanedChatData)
       console.log('[ChatPersistence] Successfully saved to backend')
-      
-      // For authenticated users, we ONLY save to backend
-      // No localStorage backup to prevent cross-user data leakage
-      
-      // Clear any existing localStorage chat data to prevent conflicts
-      clearAllChatLocalStorage()
-      console.log('[ChatPersistence] Cleared localStorage to prevent data leakage')
+      // Also save to localStorage as backup
+      localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
+      console.log('[ChatPersistence] Also saved to localStorage as backup')
     } catch (error) {
-      console.error('[ChatPersistence] Failed to save to backend:', error)
-      throw error // Don't fall back to localStorage for authenticated users
+      console.error('[ChatPersistence] Failed to save to backend, saving to localStorage only:', error)
+      localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
     }
   } else {
-    // Anonymous users: use session-specific localStorage
-    const storageKey = getUserSpecificKey(userId)
-    console.log('[ChatPersistence] Saving to localStorage for anonymous user with key:', storageKey)
-    localStorage.setItem(storageKey, JSON.stringify(cleanedChatData))
+    // Anonymous users: only use localStorage
+    console.log('[ChatPersistence] Saving to localStorage (anonymous user)')
+    localStorage.setItem('docspotlight_chats', JSON.stringify(cleanedChatData))
   }
 }
 
 /**
  * Smart chat loading: load from backend for authenticated users, localStorage for anonymous
  */
-export async function loadChats(isAuthenticated: boolean, userId?: string): Promise<ChatData | null> {
-  console.log('[ChatPersistence] loadChats called, isAuthenticated:', isAuthenticated, 'userId:', userId)
+export async function loadChats(isAuthenticated: boolean): Promise<ChatData | null> {
+  console.log('[ChatPersistence] loadChats called, isAuthenticated:', isAuthenticated)
   
   if (isAuthenticated) {
     try {
-      console.log('[ChatPersistence] Loading from backend for authenticated user...')
+      console.log('[ChatPersistence] Attempting to load from backend...')
+      // Try to load from backend first
       const backendData = await loadChatsFromBackend()
       if (backendData) {
         console.log('[ChatPersistence] Successfully loaded from backend')
-        
-        // Clear any existing localStorage data to prevent conflicts
-        clearAllChatLocalStorage()
-        
         return backendData
       } else {
-        console.log('[ChatPersistence] No data from backend')
-        return null
+        console.log('[ChatPersistence] No data from backend, trying localStorage...')
       }
     } catch (error) {
-      console.error('[ChatPersistence] Failed to load from backend:', error)
-      return null
-    }
-  } else {
-    // Anonymous users: load from session-specific localStorage
-    try {
-      const storageKey = getUserSpecificKey(userId)
-      const saved = localStorage.getItem(storageKey)
-      if (saved) {
-        console.log('[ChatPersistence] Loading from localStorage for anonymous user with key:', storageKey)
-        const data = JSON.parse(saved) as ChatData
-        console.log('[ChatPersistence] Anonymous localStorage data:', data)
-        return data
-      } else {
-        console.log('[ChatPersistence] No data in localStorage for anonymous user')
-      }
-    } catch (error) {
-      console.error('[ChatPersistence] Failed to load from localStorage:', error)
+      console.error('[ChatPersistence] Failed to load from backend, falling back to localStorage:', error)
     }
   }
 
-  console.log('[ChatPersistence] No chat data found')
+  // Fallback to localStorage (for anonymous users or when backend fails)
+  try {
+    const saved = localStorage.getItem('docspotlight_chats')
+    if (saved) {
+      console.log('[ChatPersistence] Loading from localStorage')
+      const data = JSON.parse(saved) as ChatData
+      console.log('[ChatPersistence] localStorage data:', data)
+      return data
+    } else {
+      console.log('[ChatPersistence] No data in localStorage')
+    }
+  } catch (error) {
+    console.error('[ChatPersistence] Failed to load from localStorage:', error)
+  }
+
+  console.log('[ChatPersistence] No chat data found anywhere')
   return null
 }
 
@@ -234,73 +175,33 @@ export async function loadChats(isAuthenticated: boolean, userId?: string): Prom
  */
 export async function migrateLocalChatsToBackend(): Promise<void> {
   try {
-    // Check for old localStorage format first
-    const oldLocalData = localStorage.getItem('docspotlight_chats')
-    
-    // Also check for any user-specific keys
-    const userKeys: string[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)
-      if (key && key.startsWith('docspotlight_chats_')) {
-        userKeys.push(key)
-      }
-    }
-    
-    let dataToMigrate: ChatData | null = null
-    
-    if (oldLocalData) {
-      dataToMigrate = JSON.parse(oldLocalData) as ChatData
-      console.log('[ChatPersistence] Found old format data to migrate')
-    } else if (userKeys.length > 0) {
-      // Try to migrate from the most recent user-specific data
-      const mostRecentKey = userKeys[userKeys.length - 1]
-      const keyData = localStorage.getItem(mostRecentKey)
-      if (keyData) {
-        dataToMigrate = JSON.parse(keyData) as ChatData
-        console.log('[ChatPersistence] Found user-specific data to migrate from key:', mostRecentKey)
-      }
-    }
-    
-    if (!dataToMigrate || !dataToMigrate.history || dataToMigrate.history.length === 0) {
-      console.log('[ChatPersistence] No data to migrate')
-      return
+    const localData = localStorage.getItem('docspotlight_chats')
+    if (!localData) {
+      return // No local data to migrate
     }
 
-    await saveChatsToBackend(dataToMigrate)
-    console.log('[ChatPersistence] Successfully migrated local chats to backend')
-    
-    // Clear all localStorage chat data after successful migration
-    clearAllChatLocalStorage()
-    console.log('[ChatPersistence] Cleared localStorage after migration')
-    
+    const chatData = JSON.parse(localData) as ChatData
+    if (!chatData.history || chatData.history.length === 0) {
+      return // No chats to migrate
+    }
+
+    await saveChatsToBackend(chatData)
+    console.log('Successfully migrated local chats to backend')
   } catch (error) {
-    console.error('[ChatPersistence] Failed to migrate local chats to backend:', error)
+    console.error('Failed to migrate local chats to backend:', error)
     // Don't throw - migration failure shouldn't block login
   }
 }
 
 /**
- * Clear chats on logout to prevent data leakage
+ * Clear only authentication tokens, preserve chat data for logged-in users
  */
-export function clearChatsOnLogout(): void {
-  console.log('[ChatPersistence] Clearing all chat data on logout for security')
-  
-  // Clear all chat-related localStorage
-  clearAllChatLocalStorage()
-  
-  // Remove authentication tokens
+export function logoutPreservingChats(): void {
+  // Only remove auth-related items, preserve chat data
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
   
-  console.log('[ChatPersistence] All user data cleared on logout')
-}
-
-/**
- * @deprecated Use clearChatsOnLogout instead
- * Clear only authentication tokens, preserve chat data for logged-in users
- */
-export function logoutPreservingChats(): void {
-  console.warn('[ChatPersistence] logoutPreservingChats is deprecated, use clearChatsOnLogout for security')
-  clearChatsOnLogout()
+  // Keep 'docspotlight_chats' in localStorage as backup
+  // The authenticated user's chats are now also saved in the backend
 }

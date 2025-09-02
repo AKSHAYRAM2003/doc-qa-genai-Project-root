@@ -34,7 +34,7 @@ interface Collection {
 }
 
 export default function HomePage() {
-  const { isAuthenticated, loading: authLoading, user } = useAuth()
+  const { isAuthenticated, loading: authLoading } = useAuth()
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -98,7 +98,7 @@ export default function HomePage() {
     const loadChatData = async () => {
       try {
         console.log('[HomePage] Loading chats, isAuthenticated:', isAuthenticated)
-        const chatData = await loadChats(isAuthenticated, user?.user_id)
+        const chatData = await loadChats(isAuthenticated)
         if (chatData) {
           console.log('[HomePage] Loaded chat data:', chatData)
           setHistory(chatData.history || [])
@@ -148,7 +148,7 @@ export default function HomePage() {
     }
     
     console.log('[HomePage] Saving chat data:', chatData)
-    saveChats(chatData, isAuthenticated, user?.user_id).catch(console.error)
+    saveChats(chatData, isAuthenticated).catch(console.error)
   }, [history, allMessages, activeChatId, chatDocuments, isAuthenticated, hasLoadedFromStorage, authLoading])
 
   // Handle chat rename
@@ -156,6 +156,50 @@ export default function HomePage() {
     setHistory(prev => prev.map(h => 
       h.id === chatId ? { ...h, title: newTitle } : h
     ))
+  }
+
+  // Restore documents for a chat when switching to an existing chat
+  async function restoreChatDocuments(chatId: string) {
+    if (!isAuthenticated) return
+    
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+      
+      const response = await fetch(`/api/user/restore-chat-documents/${chatId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log(`[RestoreDocs] Restored ${data.documents_restored} documents for chat ${chatId}:`, data.documents)
+        
+        // Update chat documents for this chat if any were restored
+        if (data.documents && data.documents.length > 0) {
+          const restoredDocs = data.documents
+            .filter((doc: any) => doc.status === 'restored' || doc.status === 'already_loaded')
+            .map((doc: any) => ({
+              doc_id: doc.doc_id,
+              filename: doc.filename,
+              // Add other properties as needed
+            }))
+          
+          if (restoredDocs.length > 0) {
+            setChatDocuments(prev => ({
+              ...prev,
+              [chatId]: restoredDocs
+            }))
+          }
+        }
+      } else {
+        console.error(`[RestoreDocs] Failed to restore documents for chat ${chatId}:`, response.statusText)
+      }
+    } catch (error) {
+      console.error(`[RestoreDocs] Error restoring documents for chat ${chatId}:`, error)
+    }
   }
 
   // Handle chat delete
@@ -265,8 +309,18 @@ export default function HomePage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      
+      // Get auth token
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        throw new Error("Please log in to upload files");
+      }
+      
       const res = await fetch("/api/upload", {
         method: "POST",
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         body: formData,
       });
       if (!res.ok) throw new Error("Upload failed");
@@ -311,10 +365,24 @@ export default function HomePage() {
 
   async function fetchDocuments() {
     try {
-      const res = await fetch('/api/documents');
+      // Get auth token
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        console.log('Not authenticated, skipping document fetch');
+        return;
+      }
+      
+      const res = await fetch('/api/user/documents', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setAllDocuments(data.documents || []);
+      } else {
+        console.error('Failed to fetch user documents:', res.statusText);
       }
     } catch (e) {
       console.error('Failed to fetch documents:', e);
@@ -403,9 +471,19 @@ export default function HomePage() {
       }
       
       const endpoint = currentChatDocuments.length > 1 && !selectedCollection ? '/api/chat/multi' : '/api/chat';
+      
+      // Get auth token
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        throw new Error("Please log in to chat with documents");
+      }
+      
       const res = await fetch(endpoint, { 
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }, 
         body: JSON.stringify(requestBody) 
       })
       
@@ -496,9 +574,19 @@ export default function HomePage() {
           }
           
           const endpoint = currentChatDocuments.length > 1 && !selectedCollection ? '/api/chat/multi' : '/api/chat';
+          
+          // Get auth token
+          const token = localStorage.getItem('access_token')
+          if (!token) {
+            throw new Error("Please log in to chat with documents");
+          }
+          
           const res = await fetch(endpoint, { 
             method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }, 
             body: JSON.stringify(requestBody) 
           })
           
@@ -545,11 +633,15 @@ export default function HomePage() {
       <Sidebar
         items={history.map(h => ({ ...h, title: h.title || 'New Chat' }))}
         activeId={activeChatId}
-        onSelect={id => {
+        onSelect={async (id) => {
           // Only set loading flag if actually switching to a different chat
           if (id !== activeChatId) {
             setIsLoadingHistoricalChat(true)
             setActiveChatId(id)
+            
+            // Restore documents for this chat
+            await restoreChatDocuments(id)
+            
             // Reset the flag after a short delay to allow the chat to load
             setTimeout(() => setIsLoadingHistoricalChat(false), 100)
           }

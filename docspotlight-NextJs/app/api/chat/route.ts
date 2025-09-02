@@ -10,7 +10,14 @@ export async function POST(req: NextRequest) {
     if (!question) return NextResponse.json({ error: 'Missing question' }, { status: 400 })
     if (!did && !collection_id) return NextResponse.json({ error: 'Missing doc_id or collection_id' }, { status: 400 })
     
-    const requestBody: any = { 
+    // Get authorization header from the request
+    const authHeader = req.headers.get('authorization')
+    
+    if (!authHeader) {
+      return NextResponse.json({ error: 'No authorization header' }, { status: 401 })
+    }
+    
+    const requestBody: Record<string, unknown> = { 
       question, 
       session_id,
       enable_cache
@@ -21,15 +28,19 @@ export async function POST(req: NextRequest) {
     } else {
       requestBody.doc_id = did
     }
-    
+
     const upstream = await fetch(`${BACKEND_URL}/chat`, { 
       method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      }, 
       body: JSON.stringify(requestBody) 
     })
     const data = await upstream.json()
     return NextResponse.json(data, { status: upstream.status })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e: unknown) {
+    const error = e as Error
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
