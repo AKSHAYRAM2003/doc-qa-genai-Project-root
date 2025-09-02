@@ -3,8 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useRef, useState, useEffect } from 'react'
 import { Navbar } from './Navbar'
 import { ServerStatusBanner, ServerStatusMarquee } from './ServerStatusMarquee'
-import { ServerStatusMarqueeTest } from './ServerStatusMarqueeTest'
-import { ServerStatusMarqueeDemo } from './ServerStatusDemo'
 
 interface HeroProps {
   onFileUpload: (file: File) => void

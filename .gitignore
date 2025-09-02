@@ -32,3 +32,9 @@ yarn-error.log*
 .vercel/
 out/
 uploads/
+
+# Logs
+.Phase1-Implementation-Report.md/
+.Phase2-Implementation-Report.md/
+.Phase3-Implementation-Report.md/
+.Phase4-Implementation-Report.md/
