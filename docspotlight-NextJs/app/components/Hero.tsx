@@ -2,6 +2,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRef, useState, useEffect } from 'react'
 import { Navbar } from './Navbar'
+import { ServerStatusBanner, ServerStatusMarquee } from './ServerStatusMarquee'
+import { ServerStatusMarqueeTest } from './ServerStatusMarqueeTest'
+import { ServerStatusMarqueeDemo } from './ServerStatusDemo'
 
 interface HeroProps {
   onFileUpload: (file: File) => void
@@ -104,6 +107,8 @@ export const Hero: React.FC<HeroProps> = ({
       {/* Navbar */}
       <Navbar variant="hero" />
       
+      {/* Server Status Banner */}
+      <ServerStatusBanner />
       {/* Main Hero Content */}
       <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 sm:py-12">
         <motion.div
