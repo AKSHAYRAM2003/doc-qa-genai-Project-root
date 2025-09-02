@@ -142,6 +142,50 @@ class DocumentPersistence:
                     
             except Exception as e:
                 print(f"[Persistence] Failed to rebuild {doc_id}: {e}")
+    
+    @staticmethod
+    def rebuild_single_document(doc_id: str, file_path: str):
+        """Rebuild FAISS index and text chunks for a single document."""
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        
+        try:
+            # Re-extract text
+            text = ''
+            with open(file_path, 'rb') as file:
+                reader = pypdf.PdfReader(file)
+                for page in reader.pages:
+                    text += page.extract_text() + '\n'
+            
+            # Split into chunks
+            splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+            chunks = splitter.split_text(text)
+            
+            if chunks:
+                DOC_TEXT[doc_id] = chunks
+                
+                # Rebuild FAISS index using the same approach as upload
+                try:
+                    # Get credentials and project info
+                    credentials, project_id = google.auth.default()
+                    EMBED_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-004')
+                    LOCATION = os.getenv('GOOGLE_CLOUD_LOCATION', 'us-central1')
+                    
+                    embedder = VertexAIEmbeddings(model_name=EMBED_MODEL, project=project_id, location=LOCATION)
+                    embeddings = embedder.embed_documents(chunks)
+                    embeddings_array = np.array(embeddings).astype('float32')
+                    
+                    index = faiss.IndexFlatIP(embeddings_array.shape[1])
+                    index.add(embeddings_array)
+                    DOC_INDEX[doc_id] = index
+                    
+                    print(f"[Persistence] Successfully rebuilt document {doc_id}")
+                except Exception as embed_error:
+                    print(f"[Persistence] Failed to create embeddings for {doc_id}: {embed_error}")
+            else:
+                print(f"[Persistence] No text chunks found for {doc_id}")
+                
+        except Exception as e:
+            print(f"[Persistence] Failed to rebuild single document {doc_id}: {e}")
 
 # Phase 3: Smart Routing Logic and Advanced Features
 CONVERSATION_MEMORY: Dict[str, List[Dict]] = {}  # Store conversation history per session
@@ -766,11 +810,59 @@ app.add_middleware(
 # Phase 1: Include authentication routes
 app.include_router(auth_router)
 
-# @app.on_event("startup")
-# async def startup_event():
-#     """Load persisted document data on startup."""
-#     print("[Startup] Loading persisted document data...")
-#     DocumentPersistence.load_document_data()
+@app.on_event("startup")
+async def startup_event():
+    """Load persisted document data on startup."""
+    print("[Startup] Loading persisted document data...")
+    DocumentPersistence.load_document_data()
+    
+    # Also load documents from database for all users
+    await load_all_user_documents_from_db()
+
+async def load_all_user_documents_from_db():
+    """Load all user documents from database back into memory on startup."""
+    try:
+        from database import get_async_db
+        from models import Document
+        from sqlalchemy import select
+        
+        # Get a database session
+        db_gen = get_async_db()
+        db = await db_gen.__anext__()
+        
+        try:
+            result = await db.execute(select(Document))
+            all_documents = result.scalars().all()
+            
+            for doc in all_documents:
+                if doc.doc_id not in DOC_METADATA and os.path.exists(doc.file_path):
+                    print(f"[Startup] Reloading document {doc.doc_id}: {doc.filename}")
+                    
+                    # Add to metadata
+                    DOC_METADATA[doc.doc_id] = {
+                        'filename': doc.filename,
+                        'file_path': doc.file_path,
+                        'pages': doc.pages or 0,
+                        'file_size_kb': (doc.file_size / 1024) if doc.file_size else 0,
+                        'upload_time': doc.upload_time.isoformat() if doc.upload_time else None,
+                        'user_id': str(doc.user_id)
+                    }
+                    DOC_FILES[doc.doc_id] = doc.file_path
+                    
+                    # Rebuild document index
+                    try:
+                        DocumentPersistence.rebuild_single_document(doc.doc_id, doc.file_path)
+                        print(f"[Startup] Successfully reloaded {doc.doc_id}")
+                    except Exception as rebuild_error:
+                        print(f"[Startup] Failed to rebuild index for {doc.doc_id}: {rebuild_error}")
+                        
+            print(f"[Startup] Reloaded {len(all_documents)} documents from database")
+            
+        finally:
+            await db.close()
+            
+    except Exception as e:
+        print(f"[Startup] Error loading documents from database: {e}")
 
 class ChatRequest(BaseModel):
     question: str
@@ -1595,6 +1687,65 @@ async def chat(req: ChatRequest):
     
     return response
 
+async def reload_user_documents(user_id):
+    """Reload user's documents into memory if they're not already loaded."""
+    from sqlalchemy import select
+    from models import Document
+    
+    try:
+        # Get a database session
+        from database import get_async_db
+        db_gen = get_async_db()
+        db = await db_gen.__anext__()
+        
+        try:
+            # Get user's documents from database
+            result = await db.execute(
+                select(Document).where(Document.user_id == user_id)
+            )
+            user_documents = result.scalars().all()
+            
+            # Check which documents need to be reloaded into memory
+            for doc in user_documents:
+                if doc.doc_id not in DOC_METADATA:
+                    # Document is in DB but not in memory, try to reload it
+                    if os.path.exists(doc.file_path):
+                        print(f"[Reload] Reloading document {doc.doc_id} for user {user_id}")
+                        # Add basic metadata
+                        DOC_METADATA[doc.doc_id] = {
+                            'filename': doc.filename,
+                            'file_path': doc.file_path,
+                            'pages': doc.pages or 0,
+                            'file_size_kb': (doc.file_size / 1024) if doc.file_size else 0,
+                            'upload_time': doc.upload_time.isoformat() if doc.upload_time else None
+                        }
+                        DOC_FILES[doc.doc_id] = doc.file_path
+                        
+                        # Try to rebuild the document index
+                        try:
+                            DocumentPersistence.rebuild_single_document(doc.doc_id, doc.file_path)
+                        except Exception as rebuild_error:
+                            print(f"[Reload] Failed to rebuild index for {doc.doc_id}: {rebuild_error}")
+                    else:
+                        print(f"[Reload] Document file not found: {doc.file_path}")
+        finally:
+            await db.close()
+            
+    except Exception as e:
+        print(f"[Reload] Error reloading user documents: {e}")
+
+@app.post('/api/chat')
+async def api_chat(
+    req: ChatRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """API version of chat endpoint with authentication for frontend integration."""
+    # Reload user's documents to ensure they're available
+    await reload_user_documents(current_user.user_id)
+    
+    # Call the main chat function
+    return await chat(req)
+
 @app.get('/pdf/{doc_id}')
 async def serve_pdf(doc_id: str):
     """Serve PDF file by document ID."""
@@ -1612,6 +1763,131 @@ async def serve_pdf(doc_id: str):
         media_type='application/pdf',
         filename=filename
     )
+
+# ====== USER DOCUMENT ENDPOINTS ======
+
+@app.get('/api/user/documents')
+async def get_user_documents(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get all documents uploaded by the current user."""
+    try:
+        from sqlalchemy import select
+        from models import Document
+        
+        user_id = current_user.user_id
+        
+        # Get documents from database
+        result = await db.execute(
+            select(Document).where(Document.user_id == user_id)
+        )
+        db_documents = result.scalars().all()
+        
+        # Format documents for frontend
+        documents = []
+        for doc in db_documents:
+            # Get additional metadata from DOC_METADATA if available
+            doc_metadata = DOC_METADATA.get(doc.doc_id, {})
+            
+            documents.append({
+                'doc_id': doc.doc_id,
+                'filename': doc.filename,
+                'pages': doc.pages or doc_metadata.get('pages', 0),
+                'file_size_kb': (doc.file_size / 1024) if doc.file_size else doc_metadata.get('file_size_kb', 0),
+                'upload_time': doc.upload_time.isoformat() if doc.upload_time else doc_metadata.get('upload_time'),
+                'status': doc.status
+            })
+        
+        return {"documents": documents}
+        
+    except Exception as e:
+        print(f"Error loading user documents: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load documents: {str(e)}")
+
+@app.post('/api/user/restore-chat-documents/{chat_id}')
+async def restore_chat_documents(
+    chat_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Restore documents associated with a specific chat into memory."""
+    try:
+        from sqlalchemy import select
+        from models import ChatDocument, Document
+        
+        user_id = current_user.user_id
+        
+        # Get documents associated with this chat
+        result = await db.execute(
+            select(Document)
+            .join(ChatDocument, Document.doc_id == ChatDocument.doc_id)
+            .where(ChatDocument.chat_id == chat_id)
+            .where(Document.user_id == user_id)  # Ensure user owns the documents
+        )
+        chat_documents = result.scalars().all()
+        
+        restored_docs = []
+        for doc in chat_documents:
+            if doc.doc_id not in DOC_METADATA:
+                # Document not in memory, try to restore it
+                if os.path.exists(doc.file_path):
+                    print(f"[Restore] Restoring document {doc.doc_id} for chat {chat_id}")
+                    
+                    # Add to metadata
+                    DOC_METADATA[doc.doc_id] = {
+                        'filename': doc.filename,
+                        'file_path': doc.file_path,
+                        'pages': doc.pages or 0,
+                        'file_size_kb': (doc.file_size / 1024) if doc.file_size else 0,
+                        'upload_time': doc.upload_time.isoformat() if doc.upload_time else None,
+                        'user_id': str(doc.user_id)
+                    }
+                    DOC_FILES[doc.doc_id] = doc.file_path
+                    
+                    # Rebuild document index
+                    try:
+                        DocumentPersistence.rebuild_single_document(doc.doc_id, doc.file_path)
+                        restored_docs.append({
+                            'doc_id': doc.doc_id,
+                            'filename': doc.filename,
+                            'status': 'restored'
+                        })
+                        print(f"[Restore] Successfully restored {doc.doc_id}")
+                    except Exception as rebuild_error:
+                        print(f"[Restore] Failed to rebuild index for {doc.doc_id}: {rebuild_error}")
+                        restored_docs.append({
+                            'doc_id': doc.doc_id,
+                            'filename': doc.filename,
+                            'status': 'error',
+                            'error': str(rebuild_error)
+                        })
+                else:
+                    print(f"[Restore] Document file not found: {doc.file_path}")
+                    restored_docs.append({
+                        'doc_id': doc.doc_id,
+                        'filename': doc.filename,
+                        'status': 'file_not_found',
+                        'file_path': doc.file_path
+                    })
+            else:
+                # Document already in memory
+                restored_docs.append({
+                    'doc_id': doc.doc_id,
+                    'filename': doc.filename,
+                    'status': 'already_loaded'
+                })
+        
+        return {
+            "success": True,
+            "chat_id": chat_id,
+            "documents_restored": len(restored_docs),
+            "documents": restored_docs
+        }
+        
+    except Exception as e:
+        print(f"Error restoring chat documents: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to restore chat documents: {str(e)}")
 
 # ====== CHAT PERSISTENCE ENDPOINTS ======
 
@@ -1654,8 +1930,8 @@ async def save_user_chats(
                 print(f"[Chat Save] Successfully cleared existing chats")
         except Exception as clear_error:
             print(f"[Chat Save] Error clearing existing chats: {clear_error}")
-            # Continue anyway, as we might be able to save new chats
-            pass
+            # Re-raise to trigger rollback
+            raise clear_error
         
         # Save new chats
         for chat_item in chat_data.get('history', []):
@@ -1692,7 +1968,6 @@ async def save_user_chats(
                 # This is where uploaded documents are actually stored
                 if doc['doc_id'] in DOC_METADATA:
                     # Check if document exists in database table, if not create it
-                    from sqlalchemy import select
                     existing_doc = await db.execute(
                         select(Document).where(Document.doc_id == doc['doc_id'])
                     )
@@ -1722,7 +1997,9 @@ async def save_user_chats(
                 else:
                     print(f"[Warning] Skipping chat document {doc['doc_id']} - document not found in DOC_METADATA")
         
+        # Commit the transaction
         await db.commit()
+        print(f"[Chat Save] Successfully saved {len(chat_data.get('history', []))} chats for user {user_id}")
         
         return {"success": True, "message": "Chats saved successfully"}
         
