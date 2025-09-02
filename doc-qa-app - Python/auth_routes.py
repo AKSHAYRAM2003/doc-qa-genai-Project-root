@@ -74,7 +74,9 @@ resend.api_key = "re_jFqGbL1p_4rZhZAYpECU1XfBfifAbBBtg"
 def send_password_reset_email(email: str, first_name: str, reset_token: str):
     """Send password reset email using Resend."""
     
-    reset_url = f"http://localhost:3001/auth/reset-password?token={reset_token}"
+    # Get frontend URL from environment variable
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    reset_url = f"{frontend_url}/auth/reset-password?token={reset_token}"
     
     html_content = f"""
     <!DOCTYPE html>

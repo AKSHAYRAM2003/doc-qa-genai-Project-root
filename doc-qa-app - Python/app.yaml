@@ -1,0 +1,38 @@
+runtime: python311
+
+# Service configuration
+service: docqa-backend
+
+# Instance configuration
+instance_class: F2
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.6
+
+# Environment variables
+env_variables:
+  ENVIRONMENT: production
+  GOOGLE_CLOUD_PROJECT: YOUR_PROJECT_ID
+  GOOGLE_CLOUD_LOCATION: us-central1
+  
+# Health check configuration
+liveness_check:
+  path: "/health"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+
+readiness_check:
+  path: "/health"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+  app_start_timeout_sec: 300
+
+# Handlers
+handlers:
+- url: /.*
+  script: auto

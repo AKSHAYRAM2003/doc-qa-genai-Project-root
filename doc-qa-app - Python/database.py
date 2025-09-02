@@ -9,6 +9,11 @@ from sqlalchemy.orm import sessionmaker, Session
 from models import Base
 from typing import AsyncGenerator
 
+# Environment detection
+def is_production():
+    """Check if running in production environment."""
+    return os.getenv("ENVIRONMENT", "development").lower() == "production"
+
 # Database configuration
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
@@ -24,12 +29,23 @@ SYNC_DATABASE_URL = os.getenv(
 # Create async engine for FastAPI
 async_engine = create_async_engine(
     DATABASE_URL,
-    echo=True,  # Set to False in production
-    future=True
+    echo=False if is_production() else True,  # Disable echo in production
+    future=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,  # Validate connections before use
+    pool_recycle=3600,   # Recycle connections every hour
 )
 
 # Create sync engine for migrations
-sync_engine = create_engine(SYNC_DATABASE_URL, echo=True)
+sync_engine = create_engine(
+    SYNC_DATABASE_URL, 
+    echo=False if is_production() else True,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
 
 # Session factories
 AsyncSessionLocal = sessionmaker(
@@ -90,11 +106,6 @@ async def check_connection():
     except Exception as e:
         print(f"[Database] Connection failed: {e}")
         return False
-
-# Environment detection
-def is_production():
-    """Check if running in production environment."""
-    return os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 def get_database_config():
     """Get current database configuration."""

@@ -1,0 +1,52 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: doc-qa-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-boost: true
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/memory: 2Gi
+        run.googleapis.com/cpu: 2
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/doc-qa-genai-469807/doc-qa-backend:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: GOOGLE_API_KEY
+          value: "AIzaSyBRRk5MrPlkd39N7309kokBonteZZdADd0"
+        - name: RESEND_API_KEY
+          value: "re_jFqGbL1p_4rZhZAYpECU1XfBfifAbBBtg"
+        - name: DATABASE_URL
+          value: "sqlite+aiosqlite:///./storage/app.db"
+        - name: JWT_SECRET_KEY
+          value: "your-super-secret-jwt-key-change-in-production-2024"
+        - name: JWT_ALGORITHM
+          value: "HS256"
+        - name: ACCESS_TOKEN_EXPIRE_MINUTES
+          value: "1440"
+        - name: ENVIRONMENT
+          value: "production"
+        - name: ALLOWED_ORIGINS
+          value: "https://your-frontend-domain.vercel.app,https://localhost:3000"
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+        volumeMounts:
+        - name: storage-volume
+          mountPath: /app/storage
+      volumes:
+      - name: storage-volume
+        emptyDir: {}

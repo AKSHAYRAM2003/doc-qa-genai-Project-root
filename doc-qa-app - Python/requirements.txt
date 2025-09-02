@@ -1,0 +1,30 @@
+# Python dependencies for the doc-qa app
+pypdf
+langchain
+langchain-community
+langchain-google-vertexai
+langchain-google-genai
+faiss-cpu
+python-dotenv
+google-cloud-aiplatform
+google-cloud-storage
+google-auth
+streamlit
+fastapi
+uvicorn
+python-multipart
+
+# Phase 1: Authentication & Database
+sqlalchemy
+asyncpg
+databases[postgresql]
+python-jose[cryptography]
+passlib[bcrypt]
+alembic
+psycopg2-binary
+greenlet
+pydantic[email]
+email-validator
+
+# Email service for password reset
+resend
