@@ -34,7 +34,7 @@ interface Collection {
 }
 
 export default function HomePage() {
-  const { isAuthenticated, loading: authLoading } = useAuth()
+  const { isAuthenticated, loading: authLoading, user } = useAuth()
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -98,7 +98,7 @@ export default function HomePage() {
     const loadChatData = async () => {
       try {
         console.log('[HomePage] Loading chats, isAuthenticated:', isAuthenticated)
-        const chatData = await loadChats(isAuthenticated)
+        const chatData = await loadChats(isAuthenticated, user?.user_id)
         if (chatData) {
           console.log('[HomePage] Loaded chat data:', chatData)
           setHistory(chatData.history || [])
@@ -148,7 +148,7 @@ export default function HomePage() {
     }
     
     console.log('[HomePage] Saving chat data:', chatData)
-    saveChats(chatData, isAuthenticated).catch(console.error)
+    saveChats(chatData, isAuthenticated, user?.user_id).catch(console.error)
   }, [history, allMessages, activeChatId, chatDocuments, isAuthenticated, hasLoadedFromStorage, authLoading])
 
   // Handle chat rename
