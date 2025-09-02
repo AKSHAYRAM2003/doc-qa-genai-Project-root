@@ -194,14 +194,16 @@ export async function migrateLocalChatsToBackend(): Promise<void> {
 }
 
 /**
- * Clear only authentication tokens, preserve chat data for logged-in users
+ * Clear authentication tokens and chat data on logout
  */
-export function logoutPreservingChats(): void {
-  // Only remove auth-related items, preserve chat data
+export function clearUserDataOnLogout(): void {
+  // Remove auth-related items
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
   
-  // Keep 'docspotlight_chats' in localStorage as backup
-  // The authenticated user's chats are now also saved in the backend
+  // Remove chat data to prevent showing previous user's chats to next user
+  localStorage.removeItem('docspotlight_chats')
+  
+  console.log('[ChatPersistence] Cleared all user data on logout')
 }

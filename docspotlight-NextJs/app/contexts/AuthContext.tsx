@@ -183,11 +183,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   const logout = () => {
-    // Only remove auth tokens, preserve chat data 
-    // (chat data for authenticated users is now stored in backend)
+    // Clear auth tokens
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
+    
+    // Clear chat data to prevent showing previous user's chats
+    localStorage.removeItem('docspotlight_chats')
+    
     setUser(null)
     router.push('/auth/login')
   }

@@ -122,6 +122,19 @@ export default function HomePage() {
     loadChatData()
   }, [isAuthenticated, authLoading])
 
+  // Clear chat data when user logs out
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      console.log('[HomePage] User logged out, clearing chat data')
+      setHistory([])
+      setAllMessages({})
+      setActiveChatId(null)
+      setChatDocuments({})
+      setAllDocuments([])
+      setHasLoadedFromStorage(false)
+    }
+  }, [isAuthenticated, authLoading])
+
   // Migrate local chats to backend on login
   useEffect(() => {
     if (isAuthenticated && hasLoadedFromStorage && !authLoading) {

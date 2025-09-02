@@ -32,3 +32,6 @@ yarn-error.log*
 .vercel/
 out/
 uploads/
+
+test-files/scripts/
+test-files/
